@@ -1,0 +1,1100 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id             String             @id @default(cuid())
+  name           String
+  taxNo          String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @default(now()) @updatedAt
+  activityLogs   ActivityLog[]
+  aiJobs         AiJob[]
+  appointments   Appointment[]
+  auditLogs      AuditLog[]
+  branches       Branch[]
+  documents      Document[]
+  inventoryItems        InventoryItem[]
+  stockCategories       StockCategory[]
+  stockOutputDirections StockOutputDirection[]
+  stockExpiryBatches    StockExpiryBatch[]
+  stockRequests         StockRequest[]
+  invoices              Invoice[]
+  patients       Patient[]
+  scheduleBlocks ScheduleBlock[]
+  serviceCatalog ServiceCatalog[]
+  tasks          Task[]
+  treatmentPlans TreatmentPlan[]
+  users          UserOrganization[]
+  financialMovements FinancialMovement[]
+  currentAccounts    CurrentAccount[]
+  currentAccountTxns CurrentAccountTransaction[]
+  bankAccounts       BankAccount[]
+  labMaterials           LabMaterial[]
+  treatmentLabRelations  TreatmentLabRelation[]
+  aiRequestLogs         AiRequestLog[]
+
+  @@map("organizations")
+}
+
+model Branch {
+  id             String             @id @default(cuid())
+  organizationId String
+  name           String
+  address        String?
+  phone          String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  aiJobs         AiJob[]
+  appointments   Appointment[]
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  documents      Document[]
+  inventoryItems InventoryItem[]
+  invoices       Invoice[]
+  patients       Patient[]
+  treatmentPlans TreatmentPlan[]
+  users          UserOrganization[]
+
+  @@index([organizationId])
+  @@map("branches")
+}
+
+model User {
+  id                     String                 @id @default(cuid())
+  email                  String                 @unique
+  name                   String?
+  password               String
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  activityLogs           ActivityLog[]
+  appointmentsAsDoctor   Appointment[]          @relation("AppointmentDoctor")
+  auditLogs              AuditLog[]
+  patientCommunications  PatientCommunication[]
+  patientNotes           PatientNote[]
+  payments               Payment[]              @relation("PaymentDoctor")
+  perioChartEntries      PerioChartEntry[]
+  scheduleBlocks         ScheduleBlock[]
+  assignedTasks          Task[]                 @relation("AssignedTasks")
+  createdTasks           Task[]                 @relation("CreatedTasks")
+  assignedTreatmentItems TreatmentItem[]        @relation("TreatmentItemDoctor")
+  doctorTreatmentPlans   TreatmentPlan[]        @relation("TreatmentPlanDoctor")
+  treatmentSessions      TreatmentSession[]
+  orgs                   UserOrganization[]
+  financialMovements     FinancialMovement[]
+  stockRequests          StockRequest[]         @relation("StockRequestUser")
+  labRelationsAsResponsible TreatmentLabRelation[] @relation("LabResponsible")
+  labRelationsAsDoctor      TreatmentLabRelation[] @relation("LabDoctor")
+  aiRequestLogs             AiRequestLog[]
+
+  @@map("users")
+}
+
+model UserOrganization {
+  id                    String       @id @default(cuid())
+  userId                String
+  organizationId        String
+  branchId              String?
+  role                  Role
+  createdAt             DateTime     @default(now())
+  primaryDoctorPatients Patient[]    @relation("PrimaryDoctor")
+  branch                Branch?      @relation(fields: [branchId], references: [id])
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user                  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId, branchId])
+  @@index([userId])
+  @@map("user_organizations")
+}
+
+model Patient {
+  id                    String                 @id @default(cuid())
+  organizationId        String
+  branchId              String?
+  primaryDoctorId       String?
+  firstName             String
+  lastName              String
+  phone                 String?
+  email                 String?
+  nationalId            String?
+  birthDate             DateTime?
+  gender                String?
+  address               String?
+  notes                 String?
+  tags                  String[]               @default([])
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  appointments          Appointment[]
+  documents             Document[]
+  invoices              Invoice[]
+  patientCommunications PatientCommunication[]
+  patientForms          PatientForm[]
+  patientNotes          PatientNote[]
+  branch                Branch?                @relation(fields: [branchId], references: [id])
+  organization          Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  primaryDoctor         UserOrganization?      @relation("PrimaryDoctor", fields: [primaryDoctorId], references: [id])
+  paymentPlans          PaymentPlan[]
+  payments              Payment[]
+  perioChartEntries     PerioChartEntry[]
+  tasks                 Task[]
+  treatmentPlans        TreatmentPlan[]
+  financialMovements    FinancialMovement[]
+  labRelations          TreatmentLabRelation[]
+
+  @@index([organizationId, branchId])
+  @@index([lastName, phone])
+  @@index([organizationId, email])
+  @@index([nationalId])
+  @@map("patients")
+}
+
+model Appointment {
+  id              String            @id @default(cuid())
+  organizationId  String
+  branchId        String?
+  patientId       String?
+  doctorUserId    String?
+  roomResource    String?
+  startAt         DateTime
+  endAt           DateTime
+  durationMinutes Int?
+  appointmentType AppointmentType   @default(CONSULTATION)
+  status          AppointmentStatus @default(SCHEDULED)
+  reason          String?
+  notes           String?
+  reminderSent    Boolean           @default(false)
+  sendSms         Boolean           @default(false)
+  noShowRisk      Int?
+  isUrgent        Boolean           @default(false)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  guestFirstName  String?
+  guestLastName   String?
+  guestPhone      String?
+  branch          Branch?           @relation(fields: [branchId], references: [id])
+  doctor          User?             @relation("AppointmentDoctor", fields: [doctorUserId], references: [id])
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient         Patient?          @relation(fields: [patientId], references: [id])
+
+  @@index([organizationId, branchId, startAt])
+  @@index([patientId])
+  @@index([doctorUserId])
+  @@map("appointments")
+}
+
+model TreatmentPlan {
+  id             String             @id @default(cuid())
+  organizationId String
+  branchId       String?
+  patientId      String
+  doctorUserId   String?
+  title          String
+  status         PlanStatus         @default(DRAFT)
+  isActive       Boolean            @default(true)
+  totalPrice     Int                @default(0)
+  plannedTotal   Int                @default(0)
+  completedTotal Int                @default(0)
+  approvedAt     DateTime?
+  approvedBy     String?
+  version        Int                @default(1)
+  notes          String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  payments       Payment[]
+  items          TreatmentItem[]
+  branch         Branch?            @relation(fields: [branchId], references: [id])
+  doctor         User?              @relation("TreatmentPlanDoctor", fields: [doctorUserId], references: [id])
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient        Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  planSessions   TreatmentSession[] @relation("PlanSessions")
+
+  @@index([organizationId, branchId])
+  @@index([patientId])
+  @@map("treatment_plans")
+}
+
+model TreatmentItem {
+  id               String               @id @default(cuid())
+  treatmentPlanId  String
+  organizationId   String
+  catalogServiceId String?
+  assignedDoctorId String?
+  code             String?
+  name             String
+  tooth            String?
+  surface          String?
+  price            Int
+  quantity         Int                  @default(1)
+  discount         Int                  @default(0)
+  progress         Int                  @default(0)
+  status           ItemStatus           @default(PLANNED)
+  notes            String?
+  completedAt      DateTime?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  parentItemId     String?
+  sessionId        String?
+  teeth            TreatmentItemTooth[]
+  assignedDoctor   User?                @relation("TreatmentItemDoctor", fields: [assignedDoctorId], references: [id])
+  catalog          ServiceCatalog?      @relation(fields: [catalogServiceId], references: [id])
+  parent           TreatmentItem?       @relation("ItemChildren", fields: [parentItemId], references: [id], onDelete: Cascade)
+  children         TreatmentItem[]      @relation("ItemChildren")
+  planSession      TreatmentSession?    @relation("SessionAssignedItems", fields: [sessionId], references: [id])
+  plan             TreatmentPlan        @relation(fields: [treatmentPlanId], references: [id], onDelete: Cascade)
+  sessions         TreatmentSession[]   @relation("ItemSessions")
+  labRelations     TreatmentLabRelation[]
+
+  @@index([treatmentPlanId])
+  @@index([organizationId])
+  @@index([parentItemId])
+  @@map("treatment_items")
+}
+
+model TreatmentItemTooth {
+  id              String        @id @default(cuid())
+  treatmentItemId String
+  toothCode       String
+  item            TreatmentItem @relation(fields: [treatmentItemId], references: [id], onDelete: Cascade)
+
+  @@unique([treatmentItemId, toothCode])
+  @@index([treatmentItemId])
+  @@map("treatment_item_teeth")
+}
+
+model TreatmentSession {
+  id              String          @id @default(cuid())
+  organizationId  String
+  treatmentItemId String?
+  doctorId        String?
+  sessionDate     DateTime
+  status          SessionStatus   @default(PLANNED)
+  amount          Int             @default(0)
+  notes           String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  treatmentPlanId String?
+  assignedItems   TreatmentItem[] @relation("SessionAssignedItems")
+  doctor          User?           @relation(fields: [doctorId], references: [id])
+  treatmentItem   TreatmentItem?  @relation("ItemSessions", fields: [treatmentItemId], references: [id], onDelete: Cascade)
+  plan            TreatmentPlan?  @relation("PlanSessions", fields: [treatmentPlanId], references: [id], onDelete: Cascade)
+
+  @@index([treatmentItemId])
+  @@index([treatmentPlanId])
+  @@index([organizationId])
+  @@map("treatment_sessions")
+}
+
+model ServiceCatalog {
+  id             String          @id @default(cuid())
+  organizationId String
+  name           String
+  category       String?
+  defaultPrice   Int             @default(0)
+  active         Boolean         @default(true)
+  requiresLab    Boolean         @default(false)
+  description    String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  treatmentItems TreatmentItem[]
+
+  @@index([organizationId])
+  @@map("service_catalog")
+}
+
+model Invoice {
+  id             String        @id @default(cuid())
+  organizationId String
+  branchId       String?
+  patientId      String
+  number         String
+  total          Int
+  tax            Int           @default(0)
+  discount       Int           @default(0)
+  netTotal       Int
+  status         InvoiceStatus @default(OPEN)
+  notes          String?
+  dueDate        DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @default(now()) @updatedAt
+  branch         Branch?       @relation(fields: [branchId], references: [id])
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient        Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  payments       Payment[]
+
+  @@unique([organizationId, number])
+  @@index([patientId])
+  @@index([status])
+  @@map("invoices")
+}
+
+model Payment {
+  id              String         @id @default(cuid())
+  organizationId  String
+  patientId       String?
+  invoiceId       String?
+  treatmentPlanId String?
+  amount          Int
+  method          PaymentMethod  @default(CASH)
+  reference       String?
+  notes           String?
+  paidAt          DateTime       @default(now())
+  createdAt       DateTime       @default(now())
+  deletedAt       DateTime?
+  deletedBy       String?
+  updatedAt       DateTime       @default(now()) @updatedAt
+  voidReason      String?
+  doctorId        String?
+  vatRate         Int            @default(0)
+  isRefund        Boolean        @default(false)
+  doctor          User?          @relation("PaymentDoctor", fields: [doctorId], references: [id])
+  invoice         Invoice?       @relation(fields: [invoiceId], references: [id])
+  patient         Patient?       @relation(fields: [patientId], references: [id])
+  treatmentPlan   TreatmentPlan? @relation(fields: [treatmentPlanId], references: [id])
+
+  @@index([invoiceId])
+  @@index([patientId])
+  @@index([organizationId])
+  @@index([treatmentPlanId])
+  @@index([doctorId])
+  @@index([deletedAt])
+  @@map("payments")
+}
+
+model PaymentPlan {
+  id             String            @id @default(cuid())
+  organizationId String
+  patientId      String
+  totalAmount    Int
+  notes          String?
+  status         PaymentPlanStatus @default(ACTIVE)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @default(now()) @updatedAt
+  installments   Installment[]
+  patient        Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([organizationId])
+  @@map("payment_plans")
+}
+
+model Installment {
+  id            String            @id @default(cuid())
+  paymentPlanId String
+  amount        Int
+  dueDate       DateTime?
+  status        InstallmentStatus @default(PENDING)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @default(now()) @updatedAt
+  paymentPlan   PaymentPlan       @relation(fields: [paymentPlanId], references: [id], onDelete: Cascade)
+
+  @@index([paymentPlanId])
+  @@map("installments")
+}
+
+model StockCategory {
+  id             String          @id @default(cuid())
+  organizationId String
+  name           String
+  isActive       Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inventoryItems InventoryItem[]
+
+  @@index([organizationId])
+  @@map("stock_categories")
+}
+
+model StockOutputDirection {
+  id             String          @id @default(cuid())
+  organizationId String
+  name           String
+  isActive       Boolean         @default(true)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  stockMovements StockMovement[]
+  stockRequests  StockRequest[]
+
+  @@index([organizationId])
+  @@map("stock_output_directions")
+}
+
+model InventoryItem {
+  id             String              @id @default(cuid())
+  organizationId String
+  branchId       String?
+  categoryId     String?
+  sku            String?
+  barcode        String?
+  name           String
+  description    String?
+  unit           String?
+  vatRate        Int                 @default(0)
+  minLevel       Int                 @default(0)
+  currentStock   Int                 @default(0)
+  cost           Int?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  branch         Branch?             @relation(fields: [branchId], references: [id])
+  category       StockCategory?      @relation(fields: [categoryId], references: [id])
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  movements      StockMovement[]
+  expiryBatches  StockExpiryBatch[]
+  requestItems   StockRequestItem[]
+
+  @@index([organizationId, branchId])
+  @@index([categoryId])
+  @@index([barcode])
+  @@index([name])
+  @@map("inventory_items")
+}
+
+model StockMovement {
+  id                   String                @id @default(cuid())
+  inventoryItemId      String
+  qty                  Int
+  type                 StockMovementType
+  outputDirectionId    String?
+  totalPrice           Int?
+  reference            String?
+  notes                String?
+  createdBy            String?
+  occurredAt           DateTime              @default(now())
+  createdAt            DateTime              @default(now())
+  item                 InventoryItem         @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  outputDirection      StockOutputDirection? @relation(fields: [outputDirectionId], references: [id])
+
+  @@index([inventoryItemId])
+  @@index([outputDirectionId])
+  @@index([createdAt])
+  @@map("stock_movements")
+}
+
+model StockExpiryBatch {
+  id              String        @id @default(cuid())
+  organizationId  String
+  inventoryItemId String
+  quantity        Int           @default(0)
+  expiryDate      DateTime
+  notes           String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  item            InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([inventoryItemId])
+  @@index([expiryDate])
+  @@map("stock_expiry_batches")
+}
+
+model StockRequest {
+  id                  String               @id @default(cuid())
+  organizationId      String
+  outputDirectionId   String?
+  requestedById       String?
+  status              StockRequestStatus   @default(PENDING)
+  description         String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  outputDirection     StockOutputDirection? @relation(fields: [outputDirectionId], references: [id])
+  requestedBy         User?                @relation("StockRequestUser", fields: [requestedById], references: [id])
+  items               StockRequestItem[]
+
+  @@index([organizationId])
+  @@index([outputDirectionId])
+  @@index([requestedById])
+  @@index([status])
+  @@index([createdAt])
+  @@map("stock_requests")
+}
+
+model StockRequestItem {
+  id              String        @id @default(cuid())
+  stockRequestId  String
+  inventoryItemId String
+  requestedQty    Int
+  neededByDate    DateTime?
+  notes           String?
+  createdAt       DateTime      @default(now())
+  request         StockRequest  @relation(fields: [stockRequestId], references: [id], onDelete: Cascade)
+  item            InventoryItem @relation(fields: [inventoryItemId], references: [id])
+
+  @@index([stockRequestId])
+  @@index([inventoryItemId])
+  @@map("stock_request_items")
+}
+
+model Document {
+  id             String       @id @default(cuid())
+  organizationId String
+  branchId       String?
+  patientId      String?
+  type           String
+  title          String
+  storageKey     String
+  mimeType       String?
+  size           Int?
+  uploadedBy     String?
+  tags           String[]     @default([])
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  branch         Branch?      @relation(fields: [branchId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient        Patient?     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, branchId])
+  @@index([patientId])
+  @@index([type])
+  @@map("documents")
+}
+
+model PatientNote {
+  id             String   @id @default(cuid())
+  organizationId String
+  patientId      String
+  authorId       String?
+  content        String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  author         User?    @relation(fields: [authorId], references: [id])
+  patient        Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([organizationId])
+  @@map("patient_notes")
+}
+
+model PatientCommunication {
+  id             String   @id @default(cuid())
+  organizationId String
+  patientId      String
+  type           String
+  content        String
+  status         String?
+  createdBy      String?
+  createdAt      DateTime @default(now())
+  createdByUser  User?    @relation(fields: [createdBy], references: [id])
+  patient        Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([organizationId])
+  @@map("patient_communications")
+}
+
+model PatientForm {
+  id             String    @id @default(cuid())
+  organizationId String
+  patientId      String
+  formType       String
+  status         String    @default("PENDING")
+  signedAt       DateTime?
+  fileRef        String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  patient        Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+  @@index([organizationId])
+  @@map("patient_forms")
+}
+
+model PerioChartEntry {
+  id             String   @id @default(cuid())
+  organizationId String
+  patientId      String
+  toothNumber    String
+  pocketDepth    Int?
+  bleeding       Boolean  @default(false)
+  mobility       Int?
+  notes          String?
+  recordedAt     DateTime @default(now())
+  recordedBy     String?
+  patient        Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  recordedByUser User?    @relation(fields: [recordedBy], references: [id])
+
+  @@index([patientId])
+  @@index([organizationId])
+  @@map("perio_chart_entries")
+}
+
+model Task {
+  id             String       @id @default(cuid())
+  organizationId String
+  title          String
+  description    String?
+  type           TaskType     @default(TASK)
+  status         TaskStatus   @default(PENDING)
+  assignedUserId String?
+  patientId      String?
+  dueAt          DateTime?
+  completedAt    DateTime?
+  createdBy      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  assignedUser   User?        @relation("AssignedTasks", fields: [assignedUserId], references: [id])
+  createdByUser  User?        @relation("CreatedTasks", fields: [createdBy], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient        Patient?     @relation(fields: [patientId], references: [id])
+
+  @@index([organizationId])
+  @@index([assignedUserId])
+  @@index([patientId])
+  @@map("tasks")
+}
+
+model ScheduleBlock {
+  id             String            @id @default(cuid())
+  organizationId String
+  doctorUserId   String
+  startAt        DateTime
+  endAt          DateTime
+  type           ScheduleBlockType @default(BLOCKED)
+  title          String?
+  createdAt      DateTime          @default(now())
+  doctor         User              @relation(fields: [doctorUserId], references: [id], onDelete: Cascade)
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, doctorUserId])
+  @@index([startAt, endAt])
+  @@map("schedule_blocks")
+}
+
+model ActivityLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  eventType      String
+  actorUserId    String?
+  patientId      String?
+  entityType     String?
+  entityId       String?
+  summary        String
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+  actor          User?        @relation(fields: [actorUserId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([patientId])
+  @@index([eventType])
+  @@map("activity_logs")
+}
+
+model AiJob {
+  id             String       @id @default(cuid())
+  organizationId String
+  branchId       String?
+  type           String
+  status         String
+  inputRef       String?
+  inputData      Json?
+  outputJson     Json?
+  error          String?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdBy      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  branch         Branch?      @relation(fields: [branchId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, branchId])
+  @@index([type, status])
+  @@index([createdAt])
+  @@map("ai_jobs")
+}
+
+model AiRequestLog {
+  id              String   @id @default(cuid())
+  organizationId  String
+  userId          String
+  message         String
+  selectedIntent  String?
+  plannerMode     String?  // llm | fallback
+  modelUsed       String?
+  toolsCalled     String[]
+  status          String   // success | error
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([userId])
+  @@map("ai_request_logs")
+}
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String?
+  action         String
+  entity         String?
+  entityId       String?
+  changes        Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User?        @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([userId])
+  @@index([entity, entityId])
+  @@map("audit_logs")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MANAGER
+  DOCTOR
+  ASSISTANT
+  RECEPTION
+  ACCOUNTING
+  INVENTORY
+  CALLCENTER
+  READONLY
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  ARRIVED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NOSHOW
+}
+
+enum AppointmentType {
+  CONSULTATION
+  ORTHODONTICS
+  TREATMENT
+  SURGERY
+  ROOT_CANAL
+  CONTROL
+  TRYON
+  IMPLANT
+  OTHER
+}
+
+enum PlanStatus {
+  DRAFT
+  PROPOSED
+  APPROVED
+  REJECTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ItemStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum SessionStatus {
+  PLANNED
+  COMPLETED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  OPEN
+  PARTIAL
+  PAID
+  VOID
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  ONLINE
+  OTHER
+}
+
+enum PaymentPlanStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum InstallmentStatus {
+  PENDING
+  PAID
+  CANCELLED
+}
+
+enum StockMovementType {
+  IN
+  OUT
+  ADJUST
+  RETURN
+}
+
+enum StockRequestStatus {
+  PENDING
+  PREPARING
+  PREPARED
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskType {
+  TASK
+  RECALL
+}
+
+enum ScheduleBlockType {
+  WORKING
+  BREAK
+  BLOCKED
+}
+
+// ==========================================
+// FINANCE MODULE ENTITIES
+// ==========================================
+
+model FinancialMovement {
+  id               String            @id @default(cuid())
+  organizationId   String
+  type             MovementType
+  sourceType       MovementSourceType
+  sourceId         String
+  patientId        String?
+  currentAccountId String?
+  doctorId         String?
+  bankAccountId    String?
+  description      String?
+  amount           Int
+  vatRate          Int               @default(0)
+  paymentMethod    PaymentMethod?
+  occurredAt       DateTime          @default(now())
+  reference        String?
+  status           MovementStatus    @default(ACTIVE)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient          Patient?          @relation(fields: [patientId], references: [id])
+  currentAccount   CurrentAccount?   @relation(fields: [currentAccountId], references: [id])
+  doctor           User?             @relation(fields: [doctorId], references: [id])
+  bankAccount      BankAccount?      @relation(fields: [bankAccountId], references: [id])
+
+  @@index([organizationId, type])
+  @@index([organizationId, occurredAt])
+  @@index([sourceType, sourceId])
+  @@index([patientId])
+  @@index([currentAccountId])
+  @@index([bankAccountId])
+  @@map("financial_movements")
+}
+
+model CurrentAccount {
+  id             String         @id @default(cuid())
+  organizationId String
+  name           String
+  type           AccountType    @default(SUPPLIER)
+  phone          String?
+  contactName    String?
+  taxOffice      String?
+  taxNumber      String?
+  address        String?
+  note           String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  movements      FinancialMovement[]
+  transactions   CurrentAccountTransaction[]
+  labMaterials   LabMaterial[]            @relation("LabMaterialSupplier")
+  labRelations   TreatmentLabRelation[]   @relation("TreatmentLabSupplier")
+
+  @@index([organizationId])
+  @@map("current_accounts")
+}
+
+model CurrentAccountTransaction {
+  id                String            @id @default(cuid())
+  organizationId    String
+  currentAccountId  String
+  transactionType   CariTransactionType
+  description       String?
+  debit             Int               @default(0)
+  credit            Int               @default(0)
+  occurredAt        DateTime          @default(now())
+  reference         String?
+  relatedEntityType String?
+  relatedEntityId   String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  organization      Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  currentAccount    CurrentAccount    @relation(fields: [currentAccountId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([currentAccountId])
+  @@index([occurredAt])
+  @@map("current_account_transactions")
+}
+
+enum MovementType {
+  PAYMENT
+  TREATMENT_COST
+  INVOICE
+  CARI_TX
+  REFUND
+  BANK_TX
+  EXPENSE
+  ADJUSTMENT
+}
+
+enum MovementSourceType {
+  PAYMENT
+  TREATMENT_ITEM
+  INVOICE
+  CARI_TRANSACTION
+  BANK_TRANSACTION
+  MANUAL
+}
+
+enum MovementStatus {
+  ACTIVE
+  VOIDED
+  CANCELLED
+}
+
+enum AccountType {
+  SUPPLIER
+  LAB
+  EXTERNAL_INSTITUTION
+  VENDOR
+  DOCTOR
+  PERSONNEL
+  HEALTH_AGENCY
+  OPERATING_EXPENSE
+  MEDICAL
+  BANK
+  CASH
+  OTHER
+}
+
+enum CariTransactionType {
+  DEBIT
+  CREDIT
+}
+
+model BankAccount {
+  id             String              @id @default(cuid())
+  organizationId String
+  name           String
+  type           BankAccountType     @default(BANK)
+  bankName       String?
+  accountNumber  String?
+  iban           String?
+  currentBalance Int                 @default(0)
+  isDefault      Boolean             @default(false)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  movements      FinancialMovement[]
+
+  @@index([organizationId])
+  @@map("bank_accounts")
+}
+
+enum BankAccountType {
+  BANK
+  CASH
+}
+
+// ==========================================
+// LABORATORY MODULE ENTITIES
+// ==========================================
+
+model LabMaterial {
+  id             String                 @id @default(cuid())
+  organizationId String
+  labSupplierId  String
+  name           String
+  unitPrice      Int                    @default(0)
+  vatRate        Int                    @default(0)
+  currency       String                 @default("TRY")
+  isActive       Boolean                @default(true)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  supplier       CurrentAccount         @relation("LabMaterialSupplier", fields: [labSupplierId], references: [id])
+  labRelations   TreatmentLabRelation[]
+
+  @@index([organizationId])
+  @@index([labSupplierId])
+  @@map("lab_materials")
+}
+
+model TreatmentLabRelation {
+  id                  String           @id @default(cuid())
+  organizationId      String
+  treatmentItemId     String
+  patientId           String
+  labSupplierId       String
+  labMaterialId       String
+  price               Int              @default(0)
+  quantity            Int              @default(1)
+  color               String?
+  status              LabRequestStatus @default(PENDING)
+  completionRate      Int              @default(0)
+  completionPriceRate Int              @default(0)
+  responsibleUserId   String?
+  doctorId            String?
+  description         String?
+  deletedAt           DateTime?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  organization        Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  treatmentItem       TreatmentItem    @relation(fields: [treatmentItemId], references: [id], onDelete: Cascade)
+  patient             Patient          @relation(fields: [patientId], references: [id])
+  labSupplier         CurrentAccount   @relation("TreatmentLabSupplier", fields: [labSupplierId], references: [id])
+  labMaterial         LabMaterial      @relation(fields: [labMaterialId], references: [id])
+  responsible         User?            @relation("LabResponsible", fields: [responsibleUserId], references: [id])
+  doctor              User?            @relation("LabDoctor", fields: [doctorId], references: [id])
+
+  @@index([organizationId])
+  @@index([treatmentItemId])
+  @@index([patientId])
+  @@index([labSupplierId])
+  @@index([labMaterialId])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("treatment_lab_relations")
+}
+
+enum LabRequestStatus {
+  PENDING
+  IN_PRODUCTION
+  READY
+  DELIVERED
+  CANCELLED
+}

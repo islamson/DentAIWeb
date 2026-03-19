@@ -1,0 +1,24 @@
+{
+  "name": "dentai-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\"",
+    "dev:server": "npm run dev --workspace=backend",
+    "dev:client": "npm run dev --workspace=frontend",
+    "build": "npm run build --workspace=frontend",
+    "preview": "npm run preview --workspace=frontend",
+    "start": "npm start --workspace=backend",
+    "db:push": "prisma db push --schema=prisma/schema.prisma",
+    "db:studio": "prisma studio --schema=prisma/schema.prisma",
+    "db:seed": "node prisma/seed.js",
+    "db:generate": "prisma generate --schema=prisma/schema.prisma"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

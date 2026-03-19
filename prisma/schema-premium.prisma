@@ -1,0 +1,273 @@
+// ============ PREMIUM AI MODULES - SCHEMA EXTENSIONS ============
+// Bu dosya mevcut schema.prisma'ya eklenecek modelleri içerir
+
+// ============ CASE ACCEPTANCE & PRICING ============
+
+model CaseAcceptanceScore {
+  id             String   @id @default(cuid())
+  organizationId String
+  patientId      String
+  treatmentPlanId String?
+  score          Int      // 0-100
+  factors        Json     // { priceHistory, pastAcceptance, demographics }
+  recommendation String   // "PUSH_HARD", "OFFER_DISCOUNT", "ALTERNATIVE_PLAN"
+  confidence     Int      // 0-100
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, patientId])
+  @@index([score])
+  @@map("case_acceptance_scores")
+}
+
+model PricingRecommendation {
+  id             String   @id @default(cuid())
+  organizationId String
+  patientId      String
+  treatmentPlanId String
+  originalPrice  Int      // kuruş
+  recommendedPrice Int
+  discount       Int      // yüzde
+  installments   Int?
+  reasoning      String   @db.Text
+  acceptanceBoost Int     // beklenen kabul artışı yüzde
+  status         String   // PENDING, APPLIED, REJECTED
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, status])
+  @@map("pricing_recommendations")
+}
+
+// ============ DOCTOR ANALYTICS ============
+
+model DoctorPerformanceMetrics {
+  id                    String   @id @default(cuid())
+  organizationId        String
+  doctorUserId          String
+  period                String   // DAILY, WEEKLY, MONTHLY
+  periodStart           DateTime
+  periodEnd             DateTime
+  
+  // Performance KPIs
+  treatmentAcceptanceRate Float   // yüzde
+  avgTreatmentValue      Int      // kuruş
+  patientSatisfaction    Float    // 0-5
+  noshowRecoveryRate     Float    // yüzde
+  avgSessionDuration     Int      // dakika
+  totalRevenue           Int      // kuruş
+  
+  // Behavioral Analysis
+  communicationScore     Float    // AI analiz
+  salesSkillScore        Float
+  clinicalEfficiency     Float
+  
+  // Flags
+  needsTraining          Boolean  @default(false)
+  strengths              String[] // ["clinical", "sales", "speed"]
+  weaknesses             String[] // ["follow_up", "pricing"]
+  
+  aiSuggestions          String   @db.Text
+  createdAt              DateTime @default(now())
+
+  @@index([organizationId, doctorUserId, period])
+  @@map("doctor_performance_metrics")
+}
+
+// ============ CHURN PREDICTION ============
+
+model ChurnRiskScore {
+  id             String   @id @default(cuid())
+  organizationId String
+  patientId      String
+  riskScore      Int      // 0-100 (100 = kesin terk edecek)
+  riskLevel      String   // LOW, MEDIUM, HIGH, CRITICAL
+  
+  // Risk Factors
+  daysSinceLastVisit Int
+  cancelCount        Int
+  noshowCount        Int
+  avgSatisfaction    Float?
+  lastMessageSentiment String? // POSITIVE, NEUTRAL, NEGATIVE
+  
+  // AI Recommendations
+  recommendedAction  String   // "CALL_NOW", "DISCOUNT_OFFER", "FREE_CHECKUP"
+  urgency            String   // IMMEDIATE, THIS_WEEK, THIS_MONTH
+  estimatedLTV       Int      // Lifetime value if saved (kuruş)
+  
+  actionTaken        Boolean  @default(false)
+  actionResult       String?  // SAVED, LOST, PENDING
+  
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([organizationId, riskLevel])
+  @@index([riskScore])
+  @@map("churn_risk_scores")
+}
+
+// ============ CLINIC COORDINATOR AI ============
+
+model AutomatedInteraction {
+  id             String   @id @default(cuid())
+  organizationId String
+  patientId      String
+  channel        String   // WHATSAPP, SMS, EMAIL, CALL
+  direction      String   // INCOMING, OUTGOING
+  messageText    String   @db.Text
+  aiResponse     String?  @db.Text
+  intent         String?  // BOOK_APPOINTMENT, PRICE_INQUIRY, CANCEL, etc.
+  confidence     Float
+  needsHuman     Boolean  @default(false)
+  handledBy      String?  // AI or userId
+  status         String   // PENDING, SENT, DELIVERED, FAILED
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, patientId])
+  @@index([channel, status])
+  @@map("automated_interactions")
+}
+
+// ============ OWNER ANALYTICS ============
+
+model ClinicProfitabilitySnapshot {
+  id             String   @id @default(cuid())
+  organizationId String
+  date           DateTime
+  
+  // Revenue breakdown
+  totalRevenue           Int
+  revenueByTreatmentType Json // { "implant": 150000, "filling": 50000 }
+  revenueByDoctor        Json
+  
+  // Cost analysis
+  noshowLoss             Int
+  inventoryWaste         Int
+  staffCost              Int
+  
+  // Profitability
+  grossProfit            Int
+  profitMargin           Float
+  
+  // Alerts
+  alerts                 String[] // ["HIGH_NOSHOW", "LOW_CONVERSION"]
+  recommendations        String   @db.Text
+  
+  createdAt              DateTime @default(now())
+
+  @@unique([organizationId, date])
+  @@map("clinic_profitability_snapshots")
+}
+
+model StaffProductivityScore {
+  id                 String   @id @default(cuid())
+  organizationId     String
+  userId             String
+  period             String   // DAILY, WEEKLY, MONTHLY
+  periodStart        DateTime
+  periodEnd          DateTime
+  
+  // Metrics
+  tasksCompleted     Int
+  avgTaskDuration    Int      // dakika
+  errorCount         Int
+  revenueGenerated   Int      // kuruş
+  patientInteractions Int
+  
+  // Scores (0-100)
+  efficiencyScore    Float
+  qualityScore       Float
+  speedScore         Float
+  overallScore       Float
+  
+  rank               Int?     // organizasyon içinde sıralama
+  
+  aiInsights         String   @db.Text
+  createdAt          DateTime @default(now())
+
+  @@index([organizationId, userId, period])
+  @@map("staff_productivity_scores")
+}
+
+// ============ LEGAL COMPLIANCE ============
+
+model ComplianceAuditTrail {
+  id             String   @id @default(cuid())
+  organizationId String
+  entityType     String   // TREATMENT, CONSENT, PRESCRIPTION
+  entityId       String
+  action         String
+  userId         String
+  patientId      String?
+  
+  // Legal documentation
+  dataSnapshot   Json     // Full data at time of action
+  ipAddress      String
+  deviceInfo     String?
+  geolocation    String?
+  digitalSignature String?
+  
+  // AI verification
+  aiVerified     Boolean  @default(false)
+  aiFlags        String[] // ["MISSING_CONSENT", "UNUSUAL_TIMING"]
+  
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId, entityType, entityId])
+  @@index([userId, createdAt])
+  @@map("compliance_audit_trails")
+}
+
+// ============ PATIENT PORTAL ============
+
+model PatientPortalAccess {
+  id             String   @id @default(cuid())
+  patientId      String   @unique
+  email          String   @unique
+  passwordHash   String
+  isActive       Boolean  @default(true)
+  lastLogin      DateTime?
+  loginCount     Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  @@map("patient_portal_access")
+}
+
+model PatientPortalActivity {
+  id             String   @id @default(cuid())
+  patientId      String
+  action         String   // VIEW_APPOINTMENT, DOWNLOAD_INVOICE, etc.
+  details        Json?
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+
+  @@index([patientId, createdAt])
+  @@map("patient_portal_activity")
+}
+
+// ============ INSTITUTIONAL MEMORY ============
+
+model ClinicalInsight {
+  id             String   @id @default(cuid())
+  organizationId String
+  category       String   // TREATMENT_PATTERN, PATIENT_BEHAVIOR, MARKET_TREND
+  title          String
+  description    String   @db.Text
+  confidence     Float
+  source         String   // AI_ANALYSIS, DOCTOR_INPUT, EXTERNAL_DATA
+  tags           String[]
+  impactScore    Int      // Business impact 0-100
+  
+  relatedPatients    String[] // patient IDs
+  relatedTreatments  String[] // treatment plan IDs
+  
+  isValid        Boolean  @default(true)
+  validatedBy    String?
+  validatedAt    DateTime?
+  
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId, category])
+  @@index([confidence, impactScore])
+  @@map("clinical_insights")
+}
+
