@@ -19,29 +19,63 @@ const { getMetricDefinition, APPOINTMENT_STATUS_VALUES } = require('./metric-def
  * Extract SQL from LLM response. Handles markdown code fences.
  */
 function extractSql(raw) {
-  let s = String(raw || '').trim();
+  if (!raw) return null;
 
-  // Try to extract from ```sql ... ``` blocks
-  const sqlBlock = s.match(/```(?:sql)?\s*([\s\S]*?)```/i);
-  if (sqlBlock) {
-    return sqlBlock[1].trim();
+  let s = String(raw).trim();
+
+  // 1) Remove DeepSeek-style reasoning blocks
+  s = s.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
+  // 2) Remove common prefixes
+  s = s.replace(/^(Final SQL|SQL|Query|Sorgu)\s*:\s*/i, '').trim();
+
+  // 3) Try fenced code blocks first
+  const fenceMatches = [...s.matchAll(/```(?:sql|postgresql|pgsql|psql)?\s*([\s\S]*?)```/gi)];
+  if (fenceMatches.length > 0) {
+    // Prefer the last fenced block
+    const candidate = fenceMatches[fenceMatches.length - 1][1].trim();
+    if (/^\s*SELECT\b/i.test(candidate)) {
+      return candidate.replace(/;\s*$/, '').trim();
+    }
   }
 
-  // Try to extract from { "sql": "..." } JSON
-  const jsonMatch = s.match(/"sql"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  // 4) Try strict JSON parse first
+  try {
+    const parsed = JSON.parse(s);
+    if (parsed && typeof parsed.sql === 'string' && /^\s*SELECT\b/i.test(parsed.sql.trim())) {
+      return parsed.sql.replace(/;\s*$/, '').trim();
+    }
+  } catch (_) {
+    // ignore
+  }
+
+  // 5) Try to find JSON-like sql field with regex as fallback
+  const jsonMatch = s.match(/"sql"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
   if (jsonMatch) {
-    return jsonMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').trim();
+    const candidate = jsonMatch[1]
+      .replace(/\\n/g, '\n')
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\')
+      .trim();
+
+    if (/^\s*SELECT\b/i.test(candidate)) {
+      return candidate.replace(/;\s*$/, '').trim();
+    }
   }
 
-  // If it looks like raw SQL (starts with SELECT), use as-is
+  // 6) If whole text is raw SQL
   if (/^\s*SELECT\b/i.test(s)) {
     return s.replace(/;\s*$/, '').trim();
   }
 
-  // Last resort: look for SELECT ... in the text
-  const selectMatch = s.match(/(SELECT\b[\s\S]+?)(?:;\n\n|$)/i);
-  if (selectMatch) {
-    return selectMatch[1].trim();
+  // 7) Extract all SELECT candidates, prefer the last one
+  const selectMatches = [...s.matchAll(/(SELECT\b[\s\S]*?)(?=(?:\n\s*\n)|$)/gi)];
+  for (let i = selectMatches.length - 1; i >= 0; i--) {
+    const candidate = selectMatches[i][1].trim();
+
+    if (/^\s*SELECT\b/i.test(candidate)) {
+      return candidate.replace(/;\s*$/, '').trim();
+    }
   }
 
   return null;
@@ -172,7 +206,8 @@ function buildSqlSystemPrompt(schemaSlice, readPlan) {
     'Tablo isimleri snake_case: appointments, patients, users, payments, treatment_items vs.',
     'Sadece aşağıdaki şemada verilen sütun isimlerini kullan. Başka isim UYDURMA.',
     '',
-    '"organizationId" ve "branchId" filtrelerini EKLEME — bunlar backend tarafından otomatik eklenir.',
+    '!!! ÇOK KRİTİK: Sorgunun WHERE koşuluna ASLA "organizationId" veya "branchId" ile ilgili HİÇBİR ŞEY YAZMA. Bunları backend otomatik ekleyecek. "branchId" = \'organizationId\' gibi uydurma değerler KESİNLİKLE YASAKTIR.',
+    '!!! LIMIT KURALI: Toplam/Sayım yapmıyorsan, listeleme sorgularının sonuna KESİNLİKLE LIMIT 50 ekle.',
     '',
     schemaSlice.promptText,
     '',

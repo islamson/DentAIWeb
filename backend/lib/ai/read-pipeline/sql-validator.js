@@ -112,20 +112,14 @@ function extractReferencedTables(sql) {
  * Extract column references from SQL for schema-aware validation.
  * Finds patterns like: table."columnName" or alias."columnName" or "columnName"
  */
-/**
- * Extract column references from SQL for schema-aware validation.
- * Finds patterns like: table."columnName" or "table"."columnName"
- */
 function extractColumnReferences(sql) {
   const refs = [];
-
-  // Geliştirilmiş Regex: İki tarafı tırnaklı olan "table"."column" formatını da yakalar
-  const qualifiedRe = /(?:"?([a-zA-Z_][a-zA-Z0-9_]*)"?)\."([a-zA-Z_][a-zA-Z0-9_]*)"/g;
+  // Geliştirilmiş Regex: Tırnaklı veya tırnaksız tablo.sütun kullanımlarını %100 yakalar
+  const qualifiedRe = /(?:"?([a-zA-Z_][a-zA-Z0-9_]*)"?)\.(?:"?([a-zA-Z_][a-zA-Z0-9_]*)"?)/g;
   let m;
   while ((m = qualifiedRe.exec(sql)) !== null) {
     refs.push({ tableOrAlias: m[1].toLowerCase(), column: m[2] });
   }
-
   return refs;
 }
 
@@ -219,15 +213,25 @@ function validateSchemaReferences(sql) {
   const columnRefs = extractColumnReferences(sql);
   const tableToAlias = {};
   const aliasToTable = {};
-  const aliasRe = /\b(?:FROM|JOIN)\s+["']?([a-zA-Z_][a-zA-Z0-9_]*)["']?\s+(?:AS\s+)?["']?([a-zA-Z_][a-zA-Z0-9_]*)["']?/gi;
-  let am;
-  while ((am = aliasRe.exec(sql)) !== null) {
-    const t = am[1].toLowerCase();
-    const a = am[2].toLowerCase();
-    const kw = new Set(['on', 'where', 'inner', 'left', 'right', 'outer', 'cross', 'join', 'group', 'order', 'having', 'limit', 'offset', 'and', 'or', 'not', 'set']);
-    if (!kw.has(a)) {
-      tableToAlias[t] = am[2];
-      aliasToTable[a] = t;
+  const fromJoinRe = /\b(?:FROM|JOIN)\s+["']?([a-zA-Z_][a-zA-Z0-9_]*)["']?/gi;
+  let match;
+  
+  while ((match = fromJoinRe.exec(sql)) !== null) {
+    const table = match[1].toLowerCase();
+    const afterTableIdx = fromJoinRe.lastIndex;
+    
+    // Tablo adından sonraki 50 karakteri kontrol et (alias var mı diye)
+    const remainder = sql.slice(afterTableIdx, afterTableIdx + 50);
+    const aliasMatch = remainder.match(/^\s+(?:AS\s+)?["']?([a-zA-Z_][a-zA-Z0-9_]*)["']?/i);
+    
+    if (aliasMatch) {
+      const possibleAlias = aliasMatch[1].toLowerCase();
+      // SQL anahtar kelimelerini alias olarak alma
+      const kw = new Set(['on', 'where', 'inner', 'left', 'right', 'outer', 'cross', 'join', 'group', 'order', 'having', 'limit', 'offset', 'and', 'or', 'not', 'set', 'as']);
+      if (!kw.has(possibleAlias)) {
+        tableToAlias[table] = possibleAlias;
+        aliasToTable[possibleAlias] = table;
+      }
     }
   }
 
@@ -379,19 +383,17 @@ function validateSql(sql, options = { schemaAware: true }) {
 /**
  * Attempt to repair SQL when validation fails.
  * Only repairs safe, non-semantic issues (e.g. add LIMIT).
- * Does NOT modify valid SQL or change semantics.
  */
-function repairSql(sql, validationResult) {
-  if (!sql || !validationResult) return sql;
-  let repaired = sql.trim();
+function repairSql(sql) {
+  if (!sql) return sql;
+  let repaired = sql.trim().replace(/;\s*$/, '');
 
-  if (validationResult.reason === 'LIMIT is required for non-aggregate queries') {
-    if (!/\bLIMIT\b/i.test(repaired)) {
-      repaired = repaired.replace(/\s*$/, '') + ' LIMIT 100';
-    }
+  // Sorgu satır döndürüyorsa ve LIMIT yoksa, agresif bir şekilde LIMIT ekle
+  if (needsLimit(repaired)) {
+    repaired += ' LIMIT 50';
   }
 
-  return repaired.trim();
+  return repaired;
 }
 
 module.exports = {
