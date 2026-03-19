@@ -16,6 +16,7 @@ const METRICS = {
   pending_collection_amount: 'pending_collection_amount',
   female_patient_ratio: 'female_patient_ratio',
   cancellation_distribution_by_hour: 'cancellation_distribution_by_hour',
+  doctor_efficiency: 'doctor_efficiency'
 };
 
 /**
@@ -109,6 +110,15 @@ const DEFINITIONS = {
     requiresLimit: true,
     defaultLimit: 24,
   },
+
+  [METRICS.doctor_efficiency]: {
+    description: 'Doktor verimliliği (Tedavi kalemlerinin ortalama tamamlanma süresi bazında)',
+    semanticNote: 'Verimlilik = Tamamlanan tedavilerin (completedAt) oluşturulma zamanından (createdAt) farkının dakika cinsinden ortalamasıdır. EXTRACT(EPOCH FROM ("completedAt" - "createdAt")) / 60 kullan.',
+    tables: ['treatment_items', 'users'],
+    join: 'treatment_items."assignedDoctorId" = users.id',
+    statusFilter: 'COMPLETED',
+    requiresLimit: false,
+  }
 };
 
 function getMetricDefinition(metric) {

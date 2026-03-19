@@ -112,17 +112,34 @@ function extractReferencedTables(sql) {
  * Extract column references from SQL for schema-aware validation.
  * Finds patterns like: table."columnName" or alias."columnName" or "columnName"
  */
+/**
+ * Extract column references from SQL for schema-aware validation.
+ * Finds patterns like: table."columnName" or "table"."columnName"
+ */
 function extractColumnReferences(sql) {
   const refs = [];
 
-  // Pattern: table."column" or alias."column"
-  const qualifiedRe = /(\w+)\."(\w+)"/g;
+  // Geliştirilmiş Regex: İki tarafı tırnaklı olan "table"."column" formatını da yakalar
+  const qualifiedRe = /(?:"?([a-zA-Z_][a-zA-Z0-9_]*)"?)\."([a-zA-Z_][a-zA-Z0-9_]*)"/g;
   let m;
   while ((m = qualifiedRe.exec(sql)) !== null) {
     refs.push({ tableOrAlias: m[1].toLowerCase(), column: m[2] });
   }
 
   return refs;
+}
+
+/**
+ * Tırnak içindeki tüm tanımlayıcıları (identifier) yakalar (Tekil sütun halüsinasyonlarını yakalamak için)
+ */
+function extractAllQuotedIdentifiers(sql) {
+  const identifiers = new Set();
+  const re = /"([a-zA-Z_][a-zA-Z0-9_]*)"/g;
+  let m;
+  while ((m = re.exec(sql)) !== null) {
+    identifiers.add(m[1]);
+  }
+  return identifiers;
 }
 
 /**
@@ -217,9 +234,39 @@ function validateSchemaReferences(sql) {
   for (const ref of columnRefs) {
     const refKey = ref.tableOrAlias.toLowerCase();
     const actualTable = aliasToTable[refKey] || refKey;
+    
+    // YENİ KONTROL: Tablo SQL içinde (FROM veya JOIN ile) gerçekten kullanılmış mı?
+    if (!refTables.has(actualTable) && !cteNames.has(actualTable)) {
+      errors.push(`Table "${actualTable}" is referenced but not included in FROM/JOIN clause.`);
+      continue; // Hata ekledik, sonrakine geç
+    }
+
     if (!validTableNames.has(actualTable)) continue; // skip unknown (already reported)
     if (!isValidColumn(actualTable, ref.column)) {
       errors.push(`Column "${ref.column}" does not exist on table "${actualTable}"`);
+    }
+  }
+
+  // YENİ KONTROL: Tekil Halüsinasyonları (Örn: "product_name") yakalama
+  const allQuoted = extractAllQuotedIdentifiers(sql);
+  const joinedTables = Array.from(refTables).map(t => aliasToTable[t] || t).filter(t => validTableNames.has(t));
+  
+  for (const ident of allQuoted) {
+    const lowerIdent = ident.toLowerCase();
+    // Eğer bu kelime bir tablo adı, alias adı veya CTE adıysa güvenlidir, geç.
+    if (validTableNames.has(lowerIdent) || aliasToTable[lowerIdent] || cteNames.has(lowerIdent)) continue;
+
+    // Eğer bu kelime, JOIN edilen tablolardan en az birinde sütun olarak VARSA güvenlidir.
+    let foundInAnyTable = false;
+    for (const table of joinedTables) {
+      if (isValidColumn(table, ident)) {
+        foundInAnyTable = true;
+        break;
+      }
+    }
+    
+    if (!foundInAnyTable) {
+      errors.push(`Unknown identifier or hallucinated column: "${ident}"`);
     }
   }
 
