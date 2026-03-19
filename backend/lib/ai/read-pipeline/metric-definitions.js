@@ -83,7 +83,7 @@ const DEFINITIONS = {
 
   [METRICS.pending_collection_amount]: {
     description: 'Bekleyen tahsilat = Açık/ Kısmi faturaların kalan bakiyesi (invoice.netTotal - ödenen)',
-    semanticNote: 'NOT payments.paidAt IS NULL. Use invoices with status OPEN or PARTIAL, sum(netTotal - paid).',
+    semanticNote: 'NOT "payments"."paidAt" IS NULL. Use "invoices" with status \'OPEN\' or \'PARTIAL\', sum("netTotal" - paid amount).',
     tables: ['invoices', 'payments'],
     filters: {
       invoiceStatus: INVOICE_STATUS_OPEN,

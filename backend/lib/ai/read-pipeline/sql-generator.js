@@ -124,9 +124,9 @@ function buildSqlSystemPrompt(schemaSlice, readPlan) {
     '5. Para tutarları kuruş cinsindendir (100 ile böl → TL).',
     '6. Tarih filtreleri için timestamp karşılaştırması kullan.',
     '7. NULL kontrolü gereken yerlerde COALESCE kullan.',
-    '8. Silinen kayıtları hariç tut: payments tablosunda "deletedAt" IS NULL kontrolü yap.',
+    '8. Silinen kayıtları hariç tut: "payments" tablosunda "deletedAt" IS NULL kontrolü yap.',    
     '9. Enum değerleri tek tırnak içinde yaz (ör. \'COMPLETED\', \'CANCELLED\'). Randevu durumu ACTIVE YOK.',
-    '10. BEKLEYEN TAHSİLAT: payments.paidAt IS NULL KULLANMA. Doğru tanım: invoices (status OPEN veya PARTIAL) için netTotal - ödenen toplam. invoices ve payments JOIN, COALESCE(SUM(payments.amount),0) ile ödenen hesapla.',
+    '10. BEKLEYEN TAHSİLAT: "payments"."paidAt" IS NULL KULLANMA. Doğru tanım: "invoices" ("status" = \'OPEN\' veya \'PARTIAL\') için "netTotal" - ödenen toplam. "invoices" ve "payments" JOIN, COALESCE(SUM("payments"."amount"),0) ile ödenen hesapla.',    
     '11. Sadece SQL döndür, açıklama yazma. Markdown kod bloğu kullanma.',
     '',
     '=== SÜTUN İSİMLENDİRME KURALLARI (ÇOK ÖNEMLİ) ===',
@@ -254,11 +254,19 @@ async function generateSql(readPlan, schemaSlice) {
     throw err;
   }
 
+  // 1. SQL içindeki tüm inline (--) ve block (/* */) yorumları temizle
+  sql = sql.replace(/--.*$/gm, ''); // -- ile başlayan satır sonuna kadar sil
+  sql = sql.replace(/\/\*[\s\S]*?\*\//g, ''); // /* */ arasındaki her şeyi sil
+  
   // Clean up
   sql = sql.replace(/;\s*$/, '').trim();
 
   // Post-process: fix common LLM mistakes — snake_case → camelCase
   sql = postProcessSnakeToCamel(sql);
+
+  // ZORUNLU KONTROL: Eğer LLM payments.paidAt gibi bir şey yazdıysa ve çift tırnak koymadıysa, biz koyalım.
+  // Bu regex, tabloAdı.camelCaseSütun formatında olup çift tırnak İÇERMEYEN ifadeleri bulup tırnak içine alır.
+  sql = sql.replace(/(\b[a-zA-Z_]+)\.([a-z]+[A-Z][a-zA-Z0-9_]*)\b/g, '$1."$2"');
 
   // Fix users.userId → users.id (users table has id, not userId)
   sql = sql.replace(/\busers\.["']?userId["']?/gi, 'users.id');
