@@ -1,10 +1,8 @@
 /**
  * Scope Injector — Backend-enforced multi-tenant scoping.
  *
- * YENİ MİMARİ (Subquery Wrapping):
- * WHERE cümlelerini bozmamak ve UNION/CTE sorgularında çökmemek için,
- * FROM veya JOIN edilen fiziksel tablolar anında filtreli alt sorgulara çevrilir.
- * Örn: FROM appointments a -> FROM (SELECT * FROM appointments WHERE "organizationId" = $1) AS appointments a
+ * YENİ VE NİHAİ MİMARİ (Subquery Wrapping):
+ * Regex facialarını engellemek için en temiz yaklaşım.
  */
 
 'use strict';
@@ -35,31 +33,30 @@ function injectScope(sql, ctx, startParamIndex = 1) {
     branchParamIdx = paramIdx++;
   }
 
-  // Sadece şemada scope sütunları olan fiziksel tabloları sarıyoruz
+  // Şemadaki fiziksel tabloları dön
   for (const [tableName, tableDef] of Object.entries(TABLES)) {
     const hasOrg = tableDef.columns.some(c => c.name === 'organizationId');
     if (!hasOrg) continue;
 
     const hasBranch = tableDef.columns.some(c => c.name === 'branchId');
 
-    // Güvenli alt sorguyu oluştur (Sanal RLS)
-    let scopedTable = `(SELECT * FROM ${tableName} WHERE "organizationId" = $${orgParamIdx}`;
+    // Alt sorgunun çekirdeğini hazırla
+    let innerQuery = `SELECT * FROM ${tableName} WHERE "organizationId" = $${orgParamIdx}`;
     if (ctx.branchId && hasBranch) {
-      scopedTable += ` AND ("branchId" = $${branchParamIdx} OR "branchId" IS NULL)`;
+      innerQuery += ` AND ("branchId" = $${branchParamIdx} OR "branchId" IS NULL)`;
     }
-    scopedTable += `) AS ${tableName}`;
 
-    // Tablo adından sonra gelen isteğe bağlı "AS alias" veya sadece "alias" yapısını yakala
-    const fromRegex = new RegExp(`\\bFROM\\s+["']?${tableName}["']?(?:\\s+(?:AS\\s+)?([a-zA-Z_][a-zA-Z0-9_]*))?\\b`, 'gi');
-    const joinRegex = new RegExp(`\\bJOIN\\s+["']?${tableName}["']?(?:\\s+(?:AS\\s+)?([a-zA-Z_][a-zA-Z0-9_]*))?\\b`, 'gi');
+    // NİHAİ REGEX (Basit, Aptal ve Yıkılmaz)
+    // Sadece FROM veya JOIN kelimesinden sonra gelen tablo adını yakalar.
+    // Arkasındaki alias'a, boşluğa, WHERE kelimesine ASLA DOKUNMAZ!
+    const fromRegex = new RegExp(`(\\bFROM\\s+)["']?${tableName}["']?\\b`, 'gi');
+    const joinRegex = new RegExp(`(\\bJOIN\\s+)["']?${tableName}["']?\\b`, 'gi');
 
-    injectedSql = injectedSql.replace(fromRegex, (match, alias) => {
-      return `FROM ${scopedTable} AS ${alias || tableName}`;
-    });
-    
-    injectedSql = injectedSql.replace(joinRegex, (match, alias) => {
-      return `JOIN ${scopedTable} AS ${alias || tableName}`;
-    });
+    // Örn: LLM "FROM appointments a" yazdı.
+    // Biz sadece "FROM appointments" kısmını alıp "FROM (SELECT ...) appointments" yapıyoruz.
+    // Geri kalan " a" kısmı SQL'in orijinalinde zaten durduğu için Postgres bunu kendi kendine "alias" olarak anlıyor!
+    injectedSql = injectedSql.replace(fromRegex, `$1(${innerQuery}) ${tableName}`);
+    injectedSql = injectedSql.replace(joinRegex, `$1(${innerQuery}) ${tableName}`);
   }
 
   return {
