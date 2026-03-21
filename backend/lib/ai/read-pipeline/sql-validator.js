@@ -118,8 +118,7 @@ function extractSelectAliases(sql) {
   let match;
   while ((match = asRegex.exec(sql)) !== null) {
     if (match[1]) {
-      aliases.add(match[1]); // Orijinal hali
-      aliases.add(match[1].toLowerCase()); // Küçük harf hali
+      aliases.add(match[1].toLowerCase());
     }
   }
   return aliases;
@@ -275,13 +274,13 @@ function validateSchemaReferences(sql) {
   for (const ident of allQuoted) {
     const lowerIdent = ident.toLowerCase();
 
-    // 1. HAYAT KURTARAN KONTROL: Eğer bu kelime 'AS' ile oluşturulmuş bir takma adsa (Örn: AS "count"), KESİNLİKLE GÜVENLİDİR!
-    if (selectAliases.has(ident) || selectAliases.has(lowerIdent)) continue;
+    // 1. KONTROL: Eğer bu kelime 'AS' ile oluşturulmuş bir takma adsa, GÜVENLİDİR, atla.
+    if (selectAliases.has(lowerIdent)) continue;
 
-    // 2. KONTROL: Tablo adı veya CTE adıysa güvenlidir.
+    // 2. KONTROL: Tablo adı veya CTE adıysa güvenlidir, atla.
     if (validTableNames.has(lowerIdent) || aliasToTable[lowerIdent] || cteNames.has(lowerIdent)) continue;
 
-    // 3. KONTROL: Sütun gerçekten tablolarda var mı?
+    // 3. KONTROL: Sütun gerçekten JOIN edilen tablolardan birinde var mı?
     let foundInAnyTable = false;
     for (const table of joinedTables) {
       if (isValidColumn(table, ident)) {
@@ -290,8 +289,19 @@ function validateSchemaReferences(sql) {
       }
     }
     
+    // Eğer JOIN edilenlerde bulamadıysa ama Prisma'daki genel şemada varsa yine de tolere et (Esneklik)
     if (!foundInAnyTable) {
-      errors.push(`Unknown identifier or hallucinated column: "${ident}"`);
+      let foundInSchema = false;
+      for (const table of validTableNames) {
+        if (isValidColumn(table, ident)) {
+          foundInSchema = true;
+          break;
+        }
+      }
+      
+      if (!foundInSchema) {
+         errors.push(`Unknown identifier or hallucinated column: "${ident}"`);
+      }
     }
   }
 
