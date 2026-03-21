@@ -12,10 +12,10 @@
 
 const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').replace(/\/$/, '');
 const OLLAMA_MODEL = (process.env.OLLAMA_MODEL || 'deepseek-r1:14b').trim();
-const OLLAMA_TIMEOUT_MS = Math.max(5000, parseInt(process.env.OLLAMA_TIMEOUT_MS || '60000', 10));
-const OLLAMA_TEMPERATURE = Math.min(1, Math.max(0, parseFloat(process.env.OLLAMA_TEMPERATURE || '0.2') || 0.2));
+const OLLAMA_TIMEOUT_MS = Math.max(5000, parseInt(process.env.OLLAMA_TIMEOUT_MS || '180000', 10));
+const OLLAMA_TEMPERATURE = Math.min(1, Math.max(0, parseFloat(process.env.OLLAMA_TEMPERATURE || '0.1') || 0.1));
 const OLLAMA_NUM_CTX = parseInt(process.env.OLLAMA_NUM_CTX || '8192', 10) || 8192;
-const OLLAMA_NUM_PREDICT = parseInt(process.env.OLLAMA_NUM_PREDICT || '512', 10) || 512;
+const OLLAMA_NUM_PREDICT = parseInt(process.env.OLLAMA_NUM_PREDICT || '4096', 10) || 4096;
 
 /**
  * Call Ollama chat API.

@@ -277,6 +277,17 @@ function validateSchemaReferences(sql) {
   return { valid: errors.length === 0, errors };
 }
 
+function hasAdvancedSqlConstructs(sql) {
+  if (!sql) return false;
+
+  return (
+    /^\s*WITH\b/i.test(sql) ||
+    /\bFROM\s*\(/i.test(sql) ||
+    /\bJOIN\s*\(/i.test(sql) ||
+    /\bFULL\s+JOIN\b/i.test(sql)
+  );
+}
+
 /**
  * Validate a SQL string. Returns validation result.
  *
@@ -365,7 +376,7 @@ function validateSql(sql, options = { schemaAware: true }) {
   }
 
   // 13. Schema-aware validation (check tables/columns exist)
-  if (options.schemaAware) {
+  if (options.schemaAware && !hasAdvancedSqlConstructs(trimmed)) {
     const schemaCheck = validateSchemaReferences(trimmed);
     if (!schemaCheck.valid) {
       return {
@@ -403,6 +414,7 @@ module.exports = {
   validateSchemaReferences,
   repairSql,
   needsLimit,
+  hasAdvancedSqlConstructs,
   FORBIDDEN_KEYWORDS,
   DANGEROUS_FUNCTIONS,
   MAX_JOINS,

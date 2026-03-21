@@ -174,6 +174,64 @@ function buildMemoryContext(memory) {
   return parts.length > 0 ? parts.join('\n') : null;
 }
 
+function applyDeterministicReadPlanOverrides(message, plan) {
+  const q = String(message || '').toLocaleLowerCase('tr-TR');
+
+  // 1) Ambiguous finance wording -> clarification
+  if (q.includes('ödeme performansı')) {
+    return {
+      ...plan,
+      queryType: 'summary',
+      analysisMode: 'simple',
+      targetEntities: ['payments', 'invoices'],
+      requestedFields: [],
+      requestedMetrics: [],
+      filters: {
+        ...(plan.filters || {}),
+        timeScope: plan.filters?.timeScope || 'this_month',
+      },
+      groupBy: [],
+      orderBy: [],
+      limit: null,
+      needsClarification: true,
+      clarificationQuestion:
+        '“Ödeme performansı” ile neyi kastettiğinizi netleştirebilir misiniz? Örneğin: toplam tahsilat, bekleyen tahsilat, açık bakiye, hasta bazlı ödeme düzeni veya gecikmiş ödeme oranı.',
+      domains: ['finance'],
+    };
+  }
+
+  // 2) Doctor efficiency comparison -> force canonical metric
+  if (
+    q.includes('hangi doktorun verimi azaldı') ||
+    q.includes('hangi doktorun verimi düştü') ||
+    q.includes('doktorun verimi azaldı') ||
+    q.includes('doktorun verimi düştü')
+  ) {
+    return {
+      ...plan,
+      queryType: 'comparison',
+      analysisMode: 'grouped',
+      targetEntities: ['treatment_items', 'users'],
+      requestedFields: ['doctor_name', 'current_efficiency', 'previous_efficiency', 'change'],
+      requestedMetrics: ['doctor_efficiency'],
+      filters: {
+        ...(plan.filters || {}),
+        timeScope: plan.filters?.timeScope || 'this_month',
+        status: 'COMPLETED',
+        comparePrevious: true,
+      },
+      groupBy: ['doctor_name'],
+      orderBy: [{ field: 'change', direction: 'ASC' }],
+      limit: 10,
+      needsClarification: false,
+      clarificationQuestion: null,
+      domains: ['doctors', 'treatment'],
+    };
+  }
+
+  return plan;
+}
+
 /**
  * Generate a semantic read plan from a user message.
  *
@@ -307,6 +365,8 @@ async function generateReadPlan(message, opts = {}) {
     }
   }
 
+  plan = applyDeterministicReadPlanOverrides(message, plan);
+
   return {
     plan,
     modelUsed: 'ollama',
@@ -317,4 +377,5 @@ module.exports = {
   generateReadPlan,
   buildPlannerSystemPrompt,
   extractJson,
+  applyDeterministicReadPlanOverrides,
 };

@@ -23,33 +23,35 @@ function extractSql(raw) {
 
   let s = String(raw).trim();
 
-  // 1) Remove DeepSeek-style reasoning blocks
+  // DeepSeek / reasoning block temizliği
   s = s.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
-  // 2) Remove common prefixes
+  // Prefix temizliği
   s = s.replace(/^(Final SQL|SQL|Query|Sorgu)\s*:\s*/i, '').trim();
 
-  // 3) Try fenced code blocks first
-  const fenceMatches = [...s.matchAll(/```(?:sql|postgresql|pgsql|psql)?\s*([\s\S]*?)```/gi)];
+  // Markdown fence temizliği
+  s = s.replace(/```(?:sql|postgresql|pgsql|psql)?/gi, '```').trim();
+
+  // 1) Önce fenced block içinden al
+  const fenceMatches = [...s.matchAll(/```([\s\S]*?)```/g)];
   if (fenceMatches.length > 0) {
-    // Prefer the last fenced block
-    const candidate = fenceMatches[fenceMatches.length - 1][1].trim();
-    if (/^\s*SELECT\b/i.test(candidate)) {
-      return candidate.replace(/;\s*$/, '').trim();
+    for (let i = fenceMatches.length - 1; i >= 0; i--) {
+      const candidate = fenceMatches[i][1].trim();
+      if (/^\s*(WITH|SELECT)\b/i.test(candidate)) {
+        return candidate.replace(/;\s*$/, '').trim();
+      }
     }
   }
 
-  // 4) Try strict JSON parse first
+  // 2) JSON parse
   try {
     const parsed = JSON.parse(s);
-    if (parsed && typeof parsed.sql === 'string' && /^\s*SELECT\b/i.test(parsed.sql.trim())) {
+    if (parsed && typeof parsed.sql === 'string' && /^\s*(WITH|SELECT)\b/i.test(parsed.sql.trim())) {
       return parsed.sql.replace(/;\s*$/, '').trim();
     }
-  } catch (_) {
-    // ignore
-  }
+  } catch (_) {}
 
-  // 5) Try to find JSON-like sql field with regex as fallback
+  // 3) JSON benzeri sql field
   const jsonMatch = s.match(/"sql"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
   if (jsonMatch) {
     const candidate = jsonMatch[1]
@@ -58,27 +60,32 @@ function extractSql(raw) {
       .replace(/\\\\/g, '\\')
       .trim();
 
-    if (/^\s*SELECT\b/i.test(candidate)) {
+    if (/^\s*(WITH|SELECT)\b/i.test(candidate)) {
       return candidate.replace(/;\s*$/, '').trim();
     }
   }
 
-  // 6) If whole text is raw SQL
-  if (/^\s*SELECT\b/i.test(s)) {
-    return s.replace(/;\s*$/, '').trim();
-  }
+  // 4) Ham text içinde ilk WITH/SELECT bloğunu al
+  const startIdx = s.search(/\b(WITH|SELECT)\b/i);
+  if (startIdx >= 0) {
+    let candidate = s.slice(startIdx).trim();
 
-  // 7) Extract all SELECT candidates, prefer the last one
-  const selectMatches = [...s.matchAll(/(SELECT\b[\s\S]*?)(?=(?:\n\s*\n)|$)/gi)];
-  for (let i = selectMatches.length - 1; i >= 0; i--) {
-    const candidate = selectMatches[i][1].trim();
+    // Kapanmamış stray markdown fence/backtick temizliği
+    candidate = candidate.replace(/```+/g, '').trim();
 
-    if (/^\s*SELECT\b/i.test(candidate)) {
+    if (/^\s*(WITH|SELECT)\b/i.test(candidate)) {
       return candidate.replace(/;\s*$/, '').trim();
     }
   }
 
   return null;
+}
+
+function formatLocalDate(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 /**
@@ -93,7 +100,7 @@ function buildTimeConditionHint(filters) {
   const year = today.getFullYear();
   const month = today.getMonth();
 
-  const fmt = (d) => d.toISOString().slice(0, 10);
+  const fmt = (d) => formatLocalDate(d);
 
   const ranges = {
     today: { from: fmt(today), to: fmt(new Date(year, month, today.getDate() + 1)) },
@@ -157,6 +164,7 @@ function buildSqlSystemPrompt(schemaSlice, readPlan) {
     '4. Tabloları uygun JOIN ile bağla.',
     '5. Para tutarları kuruş cinsindendir (100 ile böl → TL).',
     '6. Tarih filtreleri için timestamp karşılaştırması kullan.',
+    '6.1 Saat formatlama gerekiyorsa PostgreSQL to_char içinde dakika için MM değil MI kullan. Örn: to_char(ts, \'YYYY-MM-DD HH24:MI\').',
     '7. NULL kontrolü gereken yerlerde COALESCE kullan.',
     '8. Silinen kayıtları hariç tut: "payments" tablosunda "deletedAt" IS NULL kontrolü yap.',    
     '9. Enum değerleri tek tırnak içinde yaz (ör. \'COMPLETED\', \'CANCELLED\'). Randevu durumu ACTIVE YOK.',

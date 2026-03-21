@@ -1,15 +1,14 @@
 /**
  * Scope Injector — Backend-enforced multi-tenant scoping.
  *
- * After the SQL is validated, this module injects "organizationId" and "branchId"
- * constraints into the query using parameterized values ($1, $2, ...).
+ * Safer version:
+ * - injects only at TOP-LEVEL WHERE / clause boundaries
+ * - avoids corrupting subqueries by inserting into first nested WHERE
+ * - skips LEFT/RIGHT/FULL joined tables in WHERE to avoid null-rejecting joins
  *
- * The LLM is instructed NOT to add these; they are added server-side to
- * guarantee correct tenant isolation.
- *
- * CRITICAL: Column names are camelCase (Prisma convention), NOT snake_case.
- *   - "organizationId" not organization_id
- *   - "branchId" not branch_id
+ * NOTE:
+ * This is still not a full SQL AST injector, but it is much safer than the
+ * previous regex-first implementation.
  */
 
 'use strict';
@@ -18,7 +17,7 @@ const { getScopeColumns, getTable } = require('./schema-registry');
 const { extractReferencedTables } = require('./sql-validator');
 
 /**
- * Determine which tables in the SQL need scope injection.
+ * Determine which top-level tables in the SQL need scope injection.
  * Returns a map of { tableName: { needsOrg: bool, needsBranch: bool } }.
  */
 function analyzeTablesForScoping(sql) {
@@ -31,7 +30,7 @@ function analyzeTablesForScoping(sql) {
 
     scopeMap[table] = {
       needsOrg: scopeCols.includes('organizationId'),
-      needsBranch: false, // branch_id check happens per-table below
+      needsBranch: scopeCols.includes('branchId'),
     };
   }
 
@@ -39,28 +38,35 @@ function analyzeTablesForScoping(sql) {
 }
 
 /**
- * Find aliases used for tables in the SQL.
- * Returns { tableName: alias } map. Alias is preserved with original case.
+ * Find aliases used for top-level FROM/JOIN tables.
+ * Returns { tableName: alias } map. Alias preserves original case.
  */
 function findTableAliases(sql) {
   const aliases = {};
   const re = /\b(?:FROM|JOIN)\s+["']?([a-zA-Z_][a-zA-Z0-9_]*)["']?\s+(?:AS\s+)?["']?([a-zA-Z_][a-zA-Z0-9_]*)["']?/gi;
   let match;
+
   while ((match = re.exec(sql)) !== null) {
     const table = match[1].toLowerCase();
     const aliasRaw = match[2];
     const alias = aliasRaw.toLowerCase();
-    const keywords = new Set(['on', 'where', 'inner', 'left', 'right', 'outer', 'cross', 'join', 'group', 'order', 'having', 'limit', 'offset', 'and', 'or', 'not', 'set']);
+
+    const keywords = new Set([
+      'on', 'where', 'inner', 'left', 'right', 'outer', 'cross',
+      'join', 'group', 'order', 'having', 'limit', 'offset',
+      'and', 'or', 'not', 'set'
+    ]);
+
     if (!keywords.has(alias)) {
       aliases[table] = aliasRaw;
     }
   }
+
   return aliases;
 }
 
 /**
- * Quote identifier for PostgreSQL if it contains uppercase (camelCase).
- * Unquoted identifiers are lowercased; quoted preserve case.
+ * Quote identifier for PostgreSQL if it contains uppercase.
  */
 function quoteIfNeeded(identifier) {
   if (!identifier || identifier === identifier.toLowerCase()) {
@@ -70,14 +76,77 @@ function quoteIfNeeded(identifier) {
 }
 
 /**
- * Inject organizationId and branchId constraints into validated SQL.
+ * Find the index of a top-level SQL keyword (WHERE, GROUP BY, ORDER BY, etc.)
+ * ignoring strings and nested parentheses.
+ */
+function findTopLevelKeywordIndex(sql, keywordRegex) {
+  let depth = 0;
+  let inSingle = false;
+  let inDouble = false;
+
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    const prev = i > 0 ? sql[i - 1] : '';
+
+    if (!inDouble && ch === '\'' && prev !== '\\') {
+      inSingle = !inSingle;
+      continue;
+    }
+
+    if (!inSingle && ch === '"' && prev !== '\\') {
+      inDouble = !inDouble;
+      continue;
+    }
+
+    if (inSingle || inDouble) continue;
+
+    if (ch === '(') {
+      depth++;
+      continue;
+    }
+
+    if (ch === ')') {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+
+    if (depth === 0) {
+      const slice = sql.slice(i);
+      const m = slice.match(keywordRegex);
+      if (m && m.index === 0) {
+        return i;
+      }
+    }
+  }
+
+  return -1;
+}
+
+/**
+ * Detect whether a top-level table is joined with LEFT/RIGHT/FULL OUTER semantics.
+ * Such tables should NOT be scoped in WHERE because that null-rejects the join.
+ */
+function isOuterJoinedTable(sql, table, alias) {
+  const names = [table, alias].filter(Boolean).map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+
+  for (const name of names) {
+    const re = new RegExp(
+      `\\b(?:LEFT|RIGHT|FULL)(?:\\s+OUTER)?\\s+JOIN\\s+["']?${name}["']?\\b`,
+      'i'
+    );
+    if (re.test(sql)) return true;
+  }
+
+  return false;
+}
+
+/**
+ * Inject organizationId / branchId constraints into TOP-LEVEL WHERE.
  *
- * Uses parameterized values ($1, $2, ...) — NEVER string interpolation.
- *
- * @param {string} sql - validated SQL (must have passed sql-validator)
- * @param {Object} ctx - request context { organizationId, branchId }
- * @param {number} startParamIndex - starting parameter index (default 1)
- * @returns {{ sql: string, params: any[] }}
+ * Strategy:
+ * - Only inject top-level scope conditions
+ * - Skip OUTER JOIN tables from WHERE injection
+ * - Never inject into nested subquery WHERE by accident
  */
 function injectScope(sql, ctx, startParamIndex = 1) {
   if (!sql || !ctx?.organizationId) {
@@ -90,13 +159,18 @@ function injectScope(sql, ctx, startParamIndex = 1) {
   let paramIdx = startParamIndex;
   const conditions = [];
 
-  // Organization ID conditions — camelCase "organizationId"
   const orgParamIdx = paramIdx;
   let orgParamUsed = false;
 
   for (const [table, scope] of Object.entries(scopeMap)) {
     if (!scope.needsOrg) continue;
-    const tableRef = aliases[table] || table;
+
+    const alias = aliases[table];
+    if (isOuterJoinedTable(sql, table, alias)) {
+      continue;
+    }
+
+    const tableRef = alias || table;
     const quotedRef = quoteIfNeeded(tableRef);
     conditions.push(`${quotedRef}."organizationId" = $${orgParamIdx}`);
     orgParamUsed = true;
@@ -107,18 +181,19 @@ function injectScope(sql, ctx, startParamIndex = 1) {
     paramIdx++;
   }
 
-  // Branch ID conditions (optional) — camelCase "branchId"
   if (ctx.branchId) {
     const branchParamIdx = paramIdx;
     let branchParamUsed = false;
 
-    for (const [table] of Object.entries(scopeMap)) {
-      const tableDef = getTable(table);
-      if (!tableDef) continue;
-      const hasBranch = tableDef.columns.some(c => c.name === 'branchId');
-      if (!hasBranch) continue;
+    for (const [table, scope] of Object.entries(scopeMap)) {
+      if (!scope.needsBranch) continue;
 
-      const tableRef = aliases[table] || table;
+      const alias = aliases[table];
+      if (isOuterJoinedTable(sql, table, alias)) {
+        continue;
+      }
+
+      const tableRef = alias || table;
       const quotedRef = quoteIfNeeded(tableRef);
       conditions.push(`(${quotedRef}."branchId" = $${branchParamIdx} OR ${quotedRef}."branchId" IS NULL)`);
       branchParamUsed = true;
@@ -134,41 +209,37 @@ function injectScope(sql, ctx, startParamIndex = 1) {
     return { sql, params: [] };
   }
 
-  // Inject conditions into the SQL
   const scopeClause = conditions.join(' AND ');
   let injectedSql;
 
-  // Check if there's already a WHERE clause
-  const whereMatch = sql.match(/\bWHERE\b/i);
-  if (whereMatch) {
-    // Insert scope conditions right after WHERE
-    const whereIdx = sql.search(/\bWHERE\b/i);
+  const whereIdx = findTopLevelKeywordIndex(sql, /^WHERE\b/i);
+
+  if (whereIdx >= 0) {
     injectedSql =
       sql.slice(0, whereIdx + 5) +
-      ' ' + scopeClause + ' AND' +
-      sql.slice(whereIdx + 5);
+      ' ' + scopeClause + ' AND ' +
+      sql.slice(whereIdx + 5).trimStart();
   } else {
-    // Need to add WHERE clause before GROUP BY, ORDER BY, LIMIT, or end
-    const insertPoints = [
-      /\bGROUP\s+BY\b/i,
-      /\bORDER\s+BY\b/i,
-      /\bLIMIT\b/i,
-      /\bHAVING\b/i,
-      /\bUNION\b/i,
+    const candidates = [
+      { re: /^GROUP\s+BY\b/i },
+      { re: /^ORDER\s+BY\b/i },
+      { re: /^LIMIT\b/i },
+      { re: /^HAVING\b/i },
+      { re: /^UNION\b/i },
     ];
 
     let insertIdx = sql.length;
-    for (const re of insertPoints) {
-      const m = sql.search(re);
-      if (m >= 0 && m < insertIdx) {
-        insertIdx = m;
+    for (const c of candidates) {
+      const idx = findTopLevelKeywordIndex(sql, c.re);
+      if (idx >= 0 && idx < insertIdx) {
+        insertIdx = idx;
       }
     }
 
     injectedSql =
       sql.slice(0, insertIdx).trimEnd() +
       '\nWHERE ' + scopeClause +
-      (insertIdx < sql.length ? '\n' + sql.slice(insertIdx) : '');
+      (insertIdx < sql.length ? '\n' + sql.slice(insertIdx).trimStart() : '');
   }
 
   return {
@@ -182,4 +253,6 @@ module.exports = {
   analyzeTablesForScoping,
   findTableAliases,
   quoteIfNeeded,
+  findTopLevelKeywordIndex,
+  isOuterJoinedTable,
 };
