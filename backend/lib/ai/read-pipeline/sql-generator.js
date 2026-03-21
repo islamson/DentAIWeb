@@ -23,17 +23,17 @@ function extractSql(raw) {
 
   let s = String(raw).trim();
 
-  // DeepSeek / reasoning block temizliği
-  s = s.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+  // YENİ: DeepSeek / reasoning block temizliği (Yarıda kesilme korumalı)
+  s = s.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '').trim();
 
   // Prefix temizliği
   s = s.replace(/^(Final SQL|SQL|Query|Sorgu)\s*:\s*/i, '').trim();
 
-  // Markdown fence temizliği
-  s = s.replace(/```(?:sql|postgresql|pgsql|psql)?/gi, '```').trim();
+  // Markdown fence temizliği (Arayüz çökmesin diye \x60 kullanıldı)
+  s = s.replace(/\x60\x60\x60(?:sql|postgresql|pgsql|psql)?/gi, '\x60\x60\x60').trim();
 
-  // 1) Önce fenced block içinden al
-  const fenceMatches = [...s.matchAll(/```([\s\S]*?)```/g)];
+  // 1) Önce fenced block içinden al (Arayüz çökmesin diye \x60 kullanıldı)
+  const fenceMatches = [...s.matchAll(/\x60\x60\x60([\s\S]*?)\x60\x60\x60/g)];
   if (fenceMatches.length > 0) {
     for (let i = fenceMatches.length - 1; i >= 0; i--) {
       const candidate = fenceMatches[i][1].trim();
@@ -71,7 +71,7 @@ function extractSql(raw) {
     let candidate = s.slice(startIdx).trim();
 
     // Kapanmamış stray markdown fence/backtick temizliği
-    candidate = candidate.replace(/```+/g, '').trim();
+    candidate = candidate.replace(/\x60+/g, '').trim();
 
     if (/^\s*(WITH|SELECT)\b/i.test(candidate)) {
       return candidate.replace(/;\s*$/, '').trim();
@@ -168,7 +168,7 @@ function buildSqlSystemPrompt(schemaSlice, readPlan) {
     '7. NULL kontrolü gereken yerlerde COALESCE kullan.',
     '8. Silinen kayıtları hariç tut: "payments" tablosunda "deletedAt" IS NULL kontrolü yap.',    
     '9. Enum değerleri tek tırnak içinde yaz (ör. \'COMPLETED\', \'CANCELLED\'). Randevu durumu ACTIVE YOK.',
-    '10. BEKLEYEN TAHSİLAT: "payments"."paidAt" IS NULL KULLANMA. Doğru tanım: "invoices" ("status" = \'OPEN\' veya \'PARTIAL\') için "netTotal" - ödenen toplam. "invoices" ve "payments" JOIN, COALESCE(SUM("payments"."amount"),0) ile ödenen hesapla.',    
+    '10. BEKLEYEN TAHSİLAT FORMÜLÜ (ÇOK ÖNEMLİ): Fatura (invoices) ile Ödeme (payments) tablolarını "invoiceId" üzerinden JOIN et. Geriye kalan bakiyeyi bulmak için KESİNLİKLE SUM("invoices"."netTotal" - COALESCE("payments"."amount", 0)) kullan. ASLA SUM(SUM(...)) veya alt sorgu içinde SUM kullanma.',
     '11. Sadece SQL döndür, açıklama yazma. Markdown kod bloğu kullanma.',
     '12. SOYUT METRİKLER VE MATEMATİK: Eğer kullanıcı "verim", "hız", "risk" gibi tablolarda doğrudan bulunmayan soyut metrikler isterse, mantıklı bir matematiksel formül (Örn: ortalama tamamlanma süresi) üretebilirsin.',
     '13. KRİTİK POSTGRESQL ZAMAN MATEMATİĞİ: PostgreSQL\'de iki TIMESTAMP farkı INTERVAL döner. Interval ile doğrudan matematiksel bölme/çarpma YAPILAMAZ! Tarih farklarını sayısal olarak (örneğin saniye veya dakika cinsinden) hesaplamak için KESİNLİKLE EXTRACT(EPOCH FROM (bitis - baslangic)) kullan. (Örn: Ortalama dakika için -> AVG(EXTRACT(EPOCH FROM ("completedAt" - "createdAt")) / 60) )',
