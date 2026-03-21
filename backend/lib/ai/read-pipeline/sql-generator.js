@@ -174,6 +174,7 @@ function buildSqlSystemPrompt(schemaSlice, readPlan) {
     '13. KRİTİK POSTGRESQL ZAMAN MATEMATİĞİ: PostgreSQL\'de iki TIMESTAMP farkı INTERVAL döner. Interval ile doğrudan matematiksel bölme/çarpma YAPILAMAZ! Tarih farklarını sayısal olarak (örneğin saniye veya dakika cinsinden) hesaplamak için KESİNLİKLE EXTRACT(EPOCH FROM (bitis - baslangic)) kullan. (Örn: Ortalama dakika için -> AVG(EXTRACT(EPOCH FROM ("completedAt" - "createdAt")) / 60) )',
     '14. Her zaman kullandığın tablonun FROM veya JOIN cümlesinde olduğuna emin ol.',
     '15. KRİTİK POSTGRESQL ALIAS KURALI: SELECT içinde AS ile isimlendirdiğin bir sütunu (Örn: AS "current_efficiency"), AYNI SELECT içindeki başka bir matematiksel işlemde (Örn: "current_efficiency" - "previous") KESİNLİKLE KULLANAMAZSIN! PostgreSQL bunu desteklemez. Matematik yapacaksan ya formülü tekrar uzun uzun yaz ya da CTE (WITH) yapısını kullan.',
+    '16. KRİTİK ALIAS KURALI: Çıktı sütunlarına veya hesaplamalara (COUNT, SUM vb.) takma ad verirken KESİNLİKLE "AS" kelimesini kullan (Örn: COUNT(*) AS "toplam", users.name AS "doctorName"). "AS" kullanmadan takma ad verme.',
     '',
     '=== SÜTUN İSİMLENDİRME KURALLARI (ÇOK ÖNEMLİ) ===',
     'Veritabanında sütun isimleri camelCase biçimindedir (snake_case DEĞİL).',

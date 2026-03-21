@@ -109,6 +109,23 @@ function extractReferencedTables(sql) {
 }
 
 /**
+ * SELECT cümlesinde AS ile tanımlanan takma adları (alias) yakalar.
+ * Böylece Validator bunları "uydurma sütun" (halüsinasyon) zannetmez.
+ */
+function extractSelectAliases(sql) {
+  const aliases = new Set();
+  const asRegex = /\bAS\s+["']?([a-zA-Z0-9_]+)["']?/gi;
+  let match;
+  while ((match = asRegex.exec(sql)) !== null) {
+    if (match[1]) {
+      aliases.add(match[1]); // Orijinal hali
+      aliases.add(match[1].toLowerCase()); // Küçük harf hali
+    }
+  }
+  return aliases;
+}
+
+/**
  * Extract column references from SQL for schema-aware validation.
  * Finds patterns like: table."columnName" or alias."columnName" or "columnName"
  */
@@ -251,16 +268,20 @@ function validateSchemaReferences(sql) {
     }
   }
 
-  // YENİ KONTROL: Tekil Halüsinasyonları (Örn: "product_name") yakalama
   const allQuoted = extractAllQuotedIdentifiers(sql);
+  const selectAliases = extractSelectAliases(sql);
   const joinedTables = Array.from(refTables).map(t => aliasToTable[t] || t).filter(t => validTableNames.has(t));
   
   for (const ident of allQuoted) {
     const lowerIdent = ident.toLowerCase();
-    // Eğer bu kelime bir tablo adı, alias adı veya CTE adıysa güvenlidir, geç.
+
+    // 1. HAYAT KURTARAN KONTROL: Eğer bu kelime 'AS' ile oluşturulmuş bir takma adsa (Örn: AS "count"), KESİNLİKLE GÜVENLİDİR!
+    if (selectAliases.has(ident) || selectAliases.has(lowerIdent)) continue;
+
+    // 2. KONTROL: Tablo adı veya CTE adıysa güvenlidir.
     if (validTableNames.has(lowerIdent) || aliasToTable[lowerIdent] || cteNames.has(lowerIdent)) continue;
 
-    // Eğer bu kelime, JOIN edilen tablolardan en az birinde sütun olarak VARSA güvenlidir.
+    // 3. KONTROL: Sütun gerçekten tablolarda var mı?
     let foundInAnyTable = false;
     for (const table of joinedTables) {
       if (isValidColumn(table, ident)) {
