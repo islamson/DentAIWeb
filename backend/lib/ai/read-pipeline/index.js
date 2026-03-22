@@ -209,10 +209,13 @@ async function executeReadPipeline({ ctx, message, memory, history, semanticCont
     if (!resultValidation.valid) {
       const fallbackMsg = getFallbackMessage(resultValidation, readPlan);
       logStage('RESULT_INVALID', { shape: resultValidation.shape });
+
       return {
         answer: fallbackMsg,
         readPlan,
         sqlUsed: scopedSql,
+        error: resultValidation.reason || 'Result validation failed',
+        errorCode: 'AI_RESULT_INVALID',
         debug,
       };
     }

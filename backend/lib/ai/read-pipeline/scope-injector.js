@@ -1,62 +1,106 @@
 /**
  * Scope Injector — Backend-enforced multi-tenant scoping.
  *
- * YENİ VE NİHAİ MİMARİ (Subquery Wrapping):
- * Regex facialarını engellemek için en temiz yaklaşım.
+ * Validated SQL içindeki fiziksel tabloları subquery ile wrap eder ve
+ * organization / branch filtresini LLM'den bağımsız olarak zorlar.
  */
 
 'use strict';
 
 const { TABLES } = require('./schema-registry');
 
-/**
- * Inject organizationId and branchId constraints into validated SQL.
- * Uses Parameterized Queries ($1, $2) to prevent SQL Injection.
- */
+const CLAUSE_KEYWORDS = new Set([
+  'WHERE',
+  'JOIN',
+  'LEFT',
+  'RIGHT',
+  'FULL',
+  'INNER',
+  'CROSS',
+  'ON',
+  'GROUP',
+  'ORDER',
+  'LIMIT',
+  'HAVING',
+  'UNION',
+  'EXCEPT',
+  'INTERSECT',
+  'OFFSET',
+  'USING',
+]);
+
+function buildScopedSubquery(tableName, tableDef, orgParamIdx, branchParamIdx, hasBranchScope) {
+  const hasBranchColumn = tableDef.columns.some(c => c.name === 'branchId');
+
+  let subquery = `SELECT * FROM ${tableName} WHERE "organizationId" = $${orgParamIdx}`;
+
+  if (hasBranchScope && hasBranchColumn) {
+    subquery += ` AND ("branchId" = $${branchParamIdx} OR "branchId" IS NULL)`;
+  }
+
+  return `(${subquery})`;
+}
+
+function buildTableRefRegex(tableName, keyword) {
+  return new RegExp(
+    `\\b${keyword}\\s+["']?${tableName}["']?(?:\\s+(?:AS\\s+)?([A-Za-z_][A-Za-z0-9_]*))?(?=\\s|,|\\)|$)`,
+    'gi'
+  );
+}
+
+function replaceTableRefs(sql, tableName, scopedSubquery, keyword) {
+  const regex = buildTableRefRegex(tableName, keyword);
+
+  return sql.replace(regex, (match, alias) => {
+    if (alias) {
+      const upper = String(alias).toUpperCase();
+
+      // Gerçek alias değil de bir sonraki SQL clause kelimesi regex tarafından yutulduysa,
+      // onu geri koy ve tablo alias'ını tableName olarak ekle.
+      if (CLAUSE_KEYWORDS.has(upper)) {
+        return `${keyword} ${scopedSubquery} ${tableName} ${alias}`;
+      }
+
+      return `${keyword} ${scopedSubquery} ${alias}`;
+    }
+
+    return `${keyword} ${scopedSubquery} ${tableName}`;
+  });
+}
+
 function injectScope(sql, ctx, startParamIndex = 1) {
   if (!sql || !ctx?.organizationId) {
     return { sql, params: [] };
   }
 
-  let injectedSql = sql;
   const params = [];
   let paramIdx = startParamIndex;
 
-  // Param 1: Organization ID
   params.push(ctx.organizationId);
   const orgParamIdx = paramIdx++;
 
-  // Param 2: Branch ID (Opsiyonel)
   let branchParamIdx = null;
   if (ctx.branchId) {
     params.push(ctx.branchId);
     branchParamIdx = paramIdx++;
   }
 
-  // Şemadaki fiziksel tabloları dön
+  let injectedSql = sql;
+
   for (const [tableName, tableDef] of Object.entries(TABLES)) {
     const hasOrg = tableDef.columns.some(c => c.name === 'organizationId');
     if (!hasOrg) continue;
 
-    const hasBranch = tableDef.columns.some(c => c.name === 'branchId');
+    const scopedSubquery = buildScopedSubquery(
+      tableName,
+      tableDef,
+      orgParamIdx,
+      branchParamIdx,
+      Boolean(ctx.branchId)
+    );
 
-    // Alt sorgunun çekirdeğini hazırla
-    let innerQuery = `SELECT * FROM ${tableName} WHERE "organizationId" = $${orgParamIdx}`;
-    if (ctx.branchId && hasBranch) {
-      innerQuery += ` AND ("branchId" = $${branchParamIdx} OR "branchId" IS NULL)`;
-    }
-
-    // NİHAİ REGEX (Basit, Aptal ve Yıkılmaz)
-    // Sadece FROM veya JOIN kelimesinden sonra gelen tablo adını yakalar.
-    // Arkasındaki alias'a, boşluğa, WHERE kelimesine ASLA DOKUNMAZ!
-    const fromRegex = new RegExp(`(\\bFROM\\s+)["']?${tableName}["']?\\b`, 'gi');
-    const joinRegex = new RegExp(`(\\bJOIN\\s+)["']?${tableName}["']?\\b`, 'gi');
-
-    // Örn: LLM "FROM appointments a" yazdı.
-    // Biz sadece "FROM appointments" kısmını alıp "FROM (SELECT ...) appointments" yapıyoruz.
-    // Geri kalan " a" kısmı SQL'in orijinalinde zaten durduğu için Postgres bunu kendi kendine "alias" olarak anlıyor!
-    injectedSql = injectedSql.replace(fromRegex, `$1(${innerQuery}) ${tableName}`);
-    injectedSql = injectedSql.replace(joinRegex, `$1(${innerQuery}) ${tableName}`);
+    injectedSql = replaceTableRefs(injectedSql, tableName, scopedSubquery, 'FROM');
+    injectedSql = replaceTableRefs(injectedSql, tableName, scopedSubquery, 'JOIN');
   }
 
   return {

@@ -17,6 +17,31 @@ const { prisma } = require('../../prisma');
 const MAX_ROWS = 500;
 const STATEMENT_TIMEOUT_MS = 5000;
 
+function normalizeScalar(val) {
+  if (typeof val === 'bigint') {
+    return Number(val);
+  }
+
+  if (val instanceof Date) {
+    return val.toISOString();
+  }
+
+  if (val && typeof val === 'object') {
+    if (typeof val.toNumber === 'function') {
+      const n = val.toNumber();
+      if (Number.isFinite(n)) return n;
+    }
+
+    if (val.constructor?.name === 'Decimal' && typeof val.toString === 'function') {
+      const n = Number(val.toString());
+      if (Number.isFinite(n)) return n;
+      return val.toString();
+    }
+  }
+
+  return val;
+}
+
 /**
  * Execute a validated, scope-injected SQL query safely.
  *
@@ -34,7 +59,6 @@ async function executeSql(sql, params = []) {
   const start = Date.now();
 
   try {
-    // Set statement timeout for this transaction
     const rows = await prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '${STATEMENT_TIMEOUT_MS}'`);
       const result = await tx.$queryRawUnsafe(sql, ...params);
@@ -42,21 +66,12 @@ async function executeSql(sql, params = []) {
     });
 
     const executionTimeMs = Date.now() - start;
-
-    // Enforce row limit
     const limitedRows = Array.isArray(rows) ? rows.slice(0, MAX_ROWS) : [];
 
-    // Convert BigInt values to numbers for JSON serialization
-    const serializedRows = limitedRows.map(row => {
+    const serializedRows = limitedRows.map((row) => {
       const clean = {};
       for (const [key, val] of Object.entries(row)) {
-        if (typeof val === 'bigint') {
-          clean[key] = Number(val);
-        } else if (val instanceof Date) {
-          clean[key] = val.toISOString();
-        } else {
-          clean[key] = val;
-        }
+        clean[key] = normalizeScalar(val);
       }
       return clean;
     });
@@ -72,18 +87,14 @@ async function executeSql(sql, params = []) {
     const executionTimeMs = Date.now() - start;
     const msg = err.message || '';
 
-    // ── Error classification ─────────────────────────────────────────────
-    // Priority 1: Schema mismatch — column/table does not exist
-    // These errors come from PostgreSQL as "column X does not exist" or
-    // "relation X does not exist" messages inside Prisma raw query errors.
     if (
       msg.includes('does not exist') ||
-      msg.includes('column') && msg.includes('not') ||
-      msg.includes('relation') && msg.includes('not') ||
-      err.code === 'P2010' && msg.includes('column') ||
-      err.code === 'P2010' && msg.includes('relation') ||
-      err.code === 'P2021' || // table not found
-      err.code === 'P2022'    // column not found
+      (msg.includes('column') && msg.includes('not')) ||
+      (msg.includes('relation') && msg.includes('not')) ||
+      (err.code === 'P2010' && msg.includes('column')) ||
+      (err.code === 'P2010' && msg.includes('relation')) ||
+      err.code === 'P2021' ||
+      err.code === 'P2022'
     ) {
       const safeErr = new Error(`Sorgu şeması uyumsuz: ${classifySchemaError(msg)}`);
       safeErr.code = 'AI_SQL_INVALID_SCHEMA';
@@ -92,7 +103,6 @@ async function executeSql(sql, params = []) {
       throw safeErr;
     }
 
-    // Priority 2: Actual timeout
     if (
       msg.includes('statement timeout') ||
       msg.includes('canceling statement due to statement timeout') ||
@@ -104,7 +114,6 @@ async function executeSql(sql, params = []) {
       throw safeErr;
     }
 
-    // Priority 3: Syntax error
     if (
       msg.includes('syntax error') ||
       msg.includes('at or near')
@@ -116,7 +125,6 @@ async function executeSql(sql, params = []) {
       throw safeErr;
     }
 
-    // Priority 4: Generic safe error
     const safeErr = new Error('SQL sorgusu çalıştırılamadı. Lütfen sorunuzu farklı ifade edin.');
     safeErr.code = 'AI_SQL_EXECUTION_FAILED';
     safeErr.executionTimeMs = executionTimeMs;
@@ -129,13 +137,11 @@ async function executeSql(sql, params = []) {
  * Extract a human-readable schema error from the PostgreSQL error message.
  */
 function classifySchemaError(msg) {
-  // "column a.patient_id does not exist" → extract the column name
   const colMatch = msg.match(/column\s+["']?(\S+?)["']?\s+does\s+not\s+exist/i);
   if (colMatch) {
     return `Sütun bulunamadı: ${colMatch[1]}`;
   }
 
-  // "relation X does not exist" → extract table name
   const relMatch = msg.match(/relation\s+["']?(\S+?)["']?\s+does\s+not\s+exist/i);
   if (relMatch) {
     return `Tablo bulunamadı: ${relMatch[1]}`;

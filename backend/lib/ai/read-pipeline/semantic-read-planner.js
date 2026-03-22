@@ -200,7 +200,93 @@ function applyDeterministicReadPlanOverrides(message, plan) {
     };
   }
 
-  // 2) Doctor efficiency comparison -> force canonical metric
+  // 2) Common finance query -> collection amount
+  if (
+    q.includes('tahsilat') &&
+    !q.includes('bekleyen') &&
+    !q.includes('ödeme performansı') &&
+    !q.includes('oran') &&
+    !q.includes('gecikmiş')
+  ) {
+    return {
+      ...plan,
+      queryType: 'amount',
+      analysisMode: 'simple',
+      targetEntities: ['payments'],
+      requestedFields: [],
+      requestedMetrics: ['collection_amount'],
+      filters: {
+        ...(plan.filters || {}),
+        timeScope: plan.filters?.timeScope || 'this_month',
+      },
+      groupBy: [],
+      orderBy: [],
+      limit: null,
+      needsClarification: false,
+      clarificationQuestion: null,
+      domains: ['finance'],
+    };
+  }
+
+  // 3) Pending collection -> canonical metric
+  if (q.includes('bekleyen tahsilat')) {
+    return {
+      ...plan,
+      queryType: 'amount',
+      analysisMode: 'simple',
+      targetEntities: ['invoices', 'payments'],
+      requestedFields: [],
+      requestedMetrics: ['pending_collection_amount'],
+      filters: {
+        ...(plan.filters || {}),
+        timeScope: plan.filters?.timeScope || 'this_month',
+      },
+      groupBy: [],
+      orderBy: [],
+      limit: null,
+      needsClarification: false,
+      clarificationQuestion: null,
+      domains: ['finance'],
+    };
+  }
+
+  // 4) Doctor patients + overdue payment ratio -> force clarification
+  if (
+    (q.includes('gecikmiş ödeme oranı') ||
+      q.includes('gecikmis odeme orani') ||
+      q.includes('vadesi geçmiş ödeme oranı') ||
+      q.includes('vadesi gecmis odeme orani')) &&
+    (
+      q.includes('dr.') ||
+      q.includes('doktor') ||
+      q.includes('hastalarının') ||
+      q.includes('hastalarinin') ||
+      q.includes('hastaları') ||
+      q.includes('hastalari')
+    )
+  ) {
+    return {
+      ...plan,
+      queryType: 'ratio',
+      analysisMode: 'simple',
+      targetEntities: ['finance', 'patients'],
+      requestedFields: [],
+      requestedMetrics: [],
+      filters: {
+        ...(plan.filters || {}),
+        timeScope: plan.filters?.timeScope || 'this_month',
+      },
+      groupBy: [],
+      orderBy: [],
+      limit: null,
+      needsClarification: true,
+      clarificationQuestion:
+        '“Gecikmiş ödeme oranı” için hangi tanımı istediğinizi netleştirebilir misiniz? Örneğin: vadesi geçmiş faturaların oranı, gecikmiş taksit oranı veya gecikmiş tutarın toplam açık bakiyeye oranı.',
+      domains: ['finance', 'patients'],
+    };
+  }
+
+  // 5) Doctor efficiency comparison -> force canonical metric
   if (
     q.includes('hangi doktorun verimi azaldı') ||
     q.includes('hangi doktorun verimi düştü') ||

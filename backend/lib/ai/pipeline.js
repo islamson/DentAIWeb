@@ -49,6 +49,7 @@ const { checkGrounding, handleGroundingFailure } = require('./grounding-guard');
 const { getListVariantMetric } = require('./capability-catalog');
 const { selectApprovedRetrieval } = require('./approved-retrievals');
 const { executeReadPipeline } = require('./read-pipeline');
+const { METRICS } = require('./assistant-contracts');
 
 require('./tools');
 
@@ -74,6 +75,25 @@ function classifyReadWrite(message) {
     if (pattern.test(text)) return 'WRITE';
   }
   return 'READ';
+}
+
+function shouldUseLegacyReadPath(semanticAnalysis, message) {
+  const metric = semanticAnalysis?.primaryMetricHint || null;
+  const text = String(message || '').toLocaleLowerCase('tr-TR');
+
+  if ([
+    METRICS.overdue_patient_list,
+    METRICS.debtor_patient_list,
+    METRICS.overdue_receivables_amount,
+    METRICS.overdue_ratio,
+  ].includes(metric)) {
+    return true;
+  }
+
+  return (
+    /\b(gecikmiş|gecikmis|vadesi geçmiş|vadesi gecmis|overdue)\b/.test(text) &&
+    /\b(taksit|ödeme|odeme|alacak|borç|borc|hasta)\b/.test(text)
+  );
 }
 
 function truncateJson(value, limit = 320) {
@@ -201,9 +221,10 @@ async function processChat({ user, message, history = [], session = null }) {
 
     // ── R/W Gate: route READ queries to guarded text-to-SQL pipeline ────
     const rwClassification = classifyReadWrite(message);
+    const forceLegacyRead = shouldUseLegacyReadPath(semanticAnalysis, message);
     summary.rwGate = rwClassification;
 
-    if (rwClassification === 'READ') {
+    if (rwClassification === 'READ' && !forceLegacyRead) {
       summary.readPipeline = true;
       const tRead = Date.now();
 
@@ -215,6 +236,12 @@ async function processChat({ user, message, history = [], session = null }) {
           history,
           semanticContext: semanticAnalysis,
         });
+
+        if (readResult.error || readResult.errorCode) {
+          const err = new Error(readResult.error || 'Read pipeline başarısız sonuç döndürdü.');
+          err.code = readResult.errorCode || 'AI_READ_PIPELINE_UNSUCCESSFUL';
+          throw err;
+        }
 
         summary.totalMs = Date.now() - t0;
         summary.planningMs = Date.now() - tRead;
@@ -273,6 +300,11 @@ async function processChat({ user, message, history = [], session = null }) {
         summary.legacyPathUsed = true;
         // Continue to legacy pipeline below
       }
+    }
+
+    if (rwClassification === 'READ' && forceLegacyRead) {
+      summary.readPipeline = false;
+      summary.legacyPathUsed = true;
     }
 
     // ── Legacy pipeline (WRITE ops or SQL pipeline fallback) ─────────────

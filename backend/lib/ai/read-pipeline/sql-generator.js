@@ -147,6 +147,104 @@ function buildTimeConditionHint(filters) {
   return `Zaman aralığı: '${range.from}' ile '${range.to}' arası. WHERE koşulunda "startAt" veya "createdAt" veya "paidAt" veya "occurredAt" sütununa >= ve < karşılaştırması ile kullan.`;
 }
 
+function getDateRange(filters = {}) {
+  const timeScope = filters?.timeScope || 'this_month';
+
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = today.getMonth();
+  const fmt = (d) => formatLocalDate(d);
+
+  const ranges = {
+    today: { from: fmt(today), to: fmt(new Date(year, month, today.getDate() + 1)) },
+    yesterday: { from: fmt(new Date(year, month, today.getDate() - 1)), to: fmt(today) },
+    this_week: (() => {
+      const day = today.getDay() || 7;
+      const start = new Date(today);
+      start.setDate(today.getDate() - day + 1);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 7);
+      return { from: fmt(start), to: fmt(end) };
+    })(),
+    last_week: (() => {
+      const day = today.getDay() || 7;
+      const endOfLastWeek = new Date(today);
+      endOfLastWeek.setDate(today.getDate() - day);
+      const startOfLastWeek = new Date(endOfLastWeek);
+      startOfLastWeek.setDate(endOfLastWeek.getDate() - 6);
+      return { from: fmt(startOfLastWeek), to: fmt(new Date(endOfLastWeek.getTime() + 86400000)) };
+    })(),
+    this_month: { from: fmt(new Date(year, month, 1)), to: fmt(new Date(year, month + 1, 1)) },
+    last_month: { from: fmt(new Date(year, month - 1, 1)), to: fmt(new Date(year, month, 1)) },
+    this_quarter: (() => {
+      const qStart = Math.floor(month / 3) * 3;
+      return { from: fmt(new Date(year, qStart, 1)), to: fmt(new Date(year, qStart + 3, 1)) };
+    })(),
+    last_quarter: (() => {
+      const qStart = Math.floor(month / 3) * 3 - 3;
+      const y = qStart < 0 ? year - 1 : year;
+      const q = qStart < 0 ? qStart + 12 : qStart;
+      return { from: fmt(new Date(y, q, 1)), to: fmt(new Date(y, q + 3, 1)) };
+    })(),
+    this_year: { from: fmt(new Date(year, 0, 1)), to: fmt(new Date(year + 1, 0, 1)) },
+    last_year: { from: fmt(new Date(year - 1, 0, 1)), to: fmt(new Date(year, 0, 1)) },
+    custom: (() => {
+      const m = (filters.month || month + 1) - 1;
+      const y = filters.year || year;
+      return { from: fmt(new Date(y, m, 1)), to: fmt(new Date(y, m + 1, 1)) };
+    })(),
+  };
+
+  return ranges[timeScope] || ranges.this_month;
+}
+
+function buildDeterministicMetricSql(readPlan) {
+  const metric = readPlan?.requestedMetrics?.[0];
+  const range = getDateRange(readPlan?.filters);
+
+  if (metric === 'collection_amount') {
+    return [
+      'SELECT',
+      '  COALESCE(SUM(payments."amount"), 0) AS "collectionAmount"',
+      'FROM payments',
+      'WHERE payments."deletedAt" IS NULL',
+      '  AND COALESCE(payments."isRefund", false) = false',
+      `  AND payments."paidAt" >= '${range.from}'`,
+      `  AND payments."paidAt" < '${range.to}'`,
+    ].join('\n');
+  }
+
+  if (metric === 'pending_collection_amount') {
+    return [
+      'WITH payment_totals AS (',
+      '  SELECT',
+      '    payments."invoiceId" AS "invoiceId",',
+      '    SUM(payments."amount") AS "paidAmount"',
+      '  FROM payments',
+      '  WHERE payments."deletedAt" IS NULL',
+      '  GROUP BY payments."invoiceId"',
+      ')',
+      'SELECT',
+      '  COALESCE(',
+      '    SUM(',
+      '      GREATEST(',
+      '        invoices."netTotal" - COALESCE(payment_totals."paidAmount", 0),',
+      '        0',
+      '      )',
+      '    ),',
+      '    0',
+      '  ) AS "pendingCollectionAmount"',
+      'FROM invoices',
+      'LEFT JOIN payment_totals ON payment_totals."invoiceId" = invoices."id"',
+      'WHERE invoices."status" IN (\'OPEN\', \'PARTIAL\')',
+      `  AND COALESCE(invoices."dueDate", invoices."createdAt") >= '${range.from}'`,
+      `  AND COALESCE(invoices."dueDate", invoices."createdAt") < '${range.to}'`,
+    ].join('\n');
+  }
+
+  return null;
+}
+
 /**
  * Build the SQL generation system prompt.
  */
@@ -239,6 +337,14 @@ function buildSqlSystemPrompt(schemaSlice, readPlan) {
  * @returns {Promise<{ sql: string, modelUsed: string }>}
  */
 async function generateSql(readPlan, schemaSlice) {
+  const deterministicSql = buildDeterministicMetricSql(readPlan);
+  if (deterministicSql) {
+    return {
+      sql: deterministicSql,
+      modelUsed: 'deterministic',
+    };
+  }
+
   const available = await isAvailable();
   if (!available) {
     throw createLlmUnavailableError('SQL generator: Ollama erişilemiyor');

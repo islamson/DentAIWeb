@@ -98,6 +98,8 @@ function renderAmount(rows, readPlan) {
 
   const metricLabels = {
     sum_amount: 'Toplam tutar',
+    collection_amount: 'Toplam tahsilat',
+    pending_collection_amount: 'Bekleyen tahsilat',
     revenue: 'Ciro',
     collection: 'Tahsilat',
     total_payment: 'Toplam ödeme',
@@ -115,7 +117,6 @@ function renderAmount(rows, readPlan) {
 function renderRatio(rows, readPlan) {
   if (!rows || rows.length === 0) return 'Oran hesaplanamadı — veri bulunamadı.';
 
-  // Multiple rows with group + count → calculate percentages
   if (rows.length > 1) {
     const numKey = Object.keys(rows[0]).find(k => typeof rows[0][k] === 'number');
     const labelKey = Object.keys(rows[0]).find(k => typeof rows[0][k] === 'string');
@@ -132,14 +133,27 @@ function renderRatio(rows, readPlan) {
     }
   }
 
-  // Single row with ratio value
-  const row = rows[0];
-  const values = Object.values(row).filter(v => typeof v === 'number');
-  if (values.length === 1) {
-    return `Oran: **%${values[0].toFixed(1)}**`;
+  const row = rows[0] || {};
+  const ratioKey = Object.keys(row).find(k =>
+    ['ratio', 'rate', 'percentage', 'pct', 'oran', 'yuzde'].some(token =>
+      k.toLowerCase().includes(token)
+    )
+  );
+
+  if (ratioKey && typeof row[ratioKey] === 'number') {
+    return `Oran: **%${row[ratioKey].toFixed(1)}**`;
   }
 
-  return `Sonuç: ${JSON.stringify(rows[0])}`;
+  const numericValues = Object.values(row).filter(v => typeof v === 'number');
+  if (numericValues.length === 1) {
+    return `Oran: **%${numericValues[0].toFixed(1)}**`;
+  }
+
+  if ('count' in row || 'totalAmount' in row || 'total' in row) {
+    return 'Oran hesaplanamadı. Sorgu oran yerine ham sayım/tutar verisi döndürdü.';
+  }
+
+  return 'Oran hesaplanamadı. Lütfen sorunuzu daha net ifade edin.';
 }
 
 /**

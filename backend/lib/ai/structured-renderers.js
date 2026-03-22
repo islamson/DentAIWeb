@@ -15,10 +15,18 @@ function formatCurrency(amount) {
   }).format(amount / 100);
 }
 
+function getPeriodLabel(period) {
+  if (!period) return null;
+  if (typeof period === 'string') return period;
+  if (typeof period?.label === 'string') return period.label;
+  if (typeof period?.name === 'string') return period.name;
+  return null;
+}
+
 function renderCount(structuredContext) {
   const count = structuredContext?.count ?? structuredContext?.totalAppointmentPatients;
   if (typeof count !== 'number') return null;
-  const period = structuredContext?.period?.label || structuredContext?.period || structuredContext?.date;
+  const period = getPeriodLabel(structuredContext?.period) || structuredContext?.date;
   if (period) return `${period} için toplam ${count}.`;
   return `Toplam ${count}.`;
 }
@@ -33,7 +41,7 @@ function renderAmount(structuredContext) {
     structuredContext?.totalValue ??
     structuredContext?.totals?.remainingBalance;
   if (amount == null) return null;
-  const period = structuredContext?.period?.label || structuredContext?.period;
+  const period = getPeriodLabel(structuredContext?.period);
   if (period) return `${period} için ${formatCurrency(amount)}.`;
   return formatCurrency(amount);
 }
