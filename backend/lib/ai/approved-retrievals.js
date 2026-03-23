@@ -54,6 +54,11 @@ const {
   buildDebtorPatientListContext,
   buildClinicCancelledAppointmentCountContext,
   buildClinicNoShowCountContext,
+  buildOverdueInstallmentPatientsContext,
+  buildOverdueInstallmentCountContext,
+  buildOverdueInstallmentAmountContext,
+  buildDoctorOverdueInstallmentRatioContext,
+  buildOverdueInstallmentRatioContext,
 } = require('./data-aggregators');
 
 function withError(data) {
@@ -152,13 +157,73 @@ const FINANCE_RETRIEVAL_CATALOGUE = {
       };
     },
   },
+  [METRICS.overdue_installment_amount]: {
+    supportedTimeScopes: [TIME_SCOPES.none, ...BROAD_TIME_SCOPES],
+    select(plan) {
+      return {
+        retrievalName: 'getOverdueInstallmentAmount',
+        buildFilter: (ctx, resolved) => buildFilter(ctx, plan, resolved),
+        execute: async ({ filter }) => buildOverdueInstallmentAmountContext(filter),
+      };
+    },
+  },
+  [METRICS.overdue_installment_count]: {
+    supportedTimeScopes: [TIME_SCOPES.none, ...BROAD_TIME_SCOPES],
+    select(plan) {
+      return {
+        retrievalName: 'getOverdueInstallmentCount',
+        buildFilter: (ctx, resolved) => buildFilter(ctx, plan, resolved),
+        execute: async ({ filter }) => buildOverdueInstallmentCountContext(filter),
+      };
+    },
+  },
+  [METRICS.overdue_installment_patient_count]: {
+    supportedTimeScopes: [TIME_SCOPES.none, ...BROAD_TIME_SCOPES],
+    select(plan) {
+      return {
+        retrievalName: 'getOverdueInstallmentPatientCount',
+        buildFilter: (ctx, resolved) => buildFilter(ctx, plan, resolved),
+        execute: async ({ filter }) => buildOverdueInstallmentCountContext(filter),
+      };
+    },
+  },
+  [METRICS.overdue_installment_patient_list]: {
+    supportedTimeScopes: [TIME_SCOPES.none, ...BROAD_TIME_SCOPES],
+    select(plan) {
+      return {
+        retrievalName: 'getOverdueInstallmentPatientList',
+        buildFilter: (ctx, resolved) => buildFilter(ctx, plan, resolved),
+        execute: async ({ filter }) => buildOverdueInstallmentPatientsContext(filter),
+      };
+    },
+  },
+  [METRICS.overdue_installment_ratio]: {
+    supportedTimeScopes: [TIME_SCOPES.none, ...BROAD_TIME_SCOPES],
+    select(plan) {
+      return {
+        retrievalName: 'getOverdueInstallmentRatio',
+        buildFilter: (ctx, resolved) => buildFilter(ctx, plan, resolved),
+        execute: async ({ filter }) => buildOverdueInstallmentRatioContext(filter),
+      };
+    },
+  },
+  [METRICS.doctor_overdue_installment_ratio]: {
+    supportedTimeScopes: [TIME_SCOPES.none, ...BROAD_TIME_SCOPES],
+    select(plan) {
+      return {
+        retrievalName: 'getDoctorOverdueInstallmentRatio',
+        buildFilter: (ctx, resolved) => buildFilter(ctx, plan, resolved),
+        execute: async ({ filter }) => buildDoctorOverdueInstallmentRatioContext(filter),
+      };
+    },
+  },
   [METRICS.overdue_patient_list]: {
     supportedTimeScopes: [TIME_SCOPES.none, ...BROAD_TIME_SCOPES],
     select(plan) {
       return {
         retrievalName: 'getDebtorPatientList',
         buildFilter: (ctx, resolved) => buildFilter(ctx, plan, resolved),
-        execute: async ({ filter }) => buildOverdueReceivablesSummaryContext(filter),
+        execute: async ({ filter }) => buildDebtorPatientListContext(filter),
       };
     },
   },
@@ -249,6 +314,14 @@ const REGISTRY = {
       METRICS.pending_collection_amount,
       METRICS.outstanding_balance_amount,
       METRICS.overdue_receivables_amount,
+
+      METRICS.overdue_installment_amount,
+      METRICS.overdue_installment_count,
+      METRICS.overdue_installment_patient_count,
+      METRICS.overdue_installment_patient_list,
+      METRICS.overdue_installment_ratio,
+      METRICS.doctor_overdue_installment_ratio,
+
       METRICS.overdue_patient_list,
       METRICS.debtor_patient_list,
       METRICS.collection_rate,

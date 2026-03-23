@@ -81,19 +81,44 @@ function shouldUseLegacyReadPath(semanticAnalysis, message) {
   const metric = semanticAnalysis?.primaryMetricHint || null;
   const text = String(message || '').toLocaleLowerCase('tr-TR');
 
-  if ([
+  const directMetricHits = [
     METRICS.overdue_patient_list,
     METRICS.debtor_patient_list,
     METRICS.overdue_receivables_amount,
     METRICS.overdue_ratio,
-  ].includes(metric)) {
+    METRICS.overdue_installment_amount,
+    METRICS.overdue_installment_count,
+    METRICS.overdue_installment_patient_count,
+    METRICS.overdue_installment_patient_list,
+    METRICS.overdue_installment_ratio,
+    METRICS.doctor_overdue_installment_ratio,
+  ];
+
+  if (directMetricHits.includes(metric)) {
     return true;
   }
 
-  return (
-    /\b(gecikmiş|gecikmis|vadesi geçmiş|vadesi gecmis|overdue)\b/.test(text) &&
-    /\b(taksit|ödeme|odeme|alacak|borç|borc|hasta)\b/.test(text)
-  );
+  const overdueLike =
+    /gecikmiş|gecikmis|vadesi geçmiş|vadesi gecmis|overdue/.test(text);
+
+  const installmentLike =
+    /taksit|taksiti|taksitin|taksitli|taksitlerin|odeme|ödeme|odemesi|ödemesi|borc|borç|alacak/.test(text);
+
+  const patientLike =
+    /hasta|hastasi|hastası|hastalar|hastalari|hastaları|hastalarin|hastaların|hastalarinin|hastalarının/.test(text);
+
+  const doctorLike =
+    /\bdr\b|dr\.|doktor|hekim/.test(text);
+
+  const ratioLike =
+    /oran|orani|oranı|yuzde|yüzde|payi|payı/.test(text);
+
+  if (overdueLike && installmentLike) return true;
+  if (overdueLike && patientLike) return true;
+  if (doctorLike && overdueLike && installmentLike) return true;
+  if (ratioLike && overdueLike && installmentLike) return true;
+
+  return false;
 }
 
 function truncateJson(value, limit = 320) {
@@ -223,6 +248,7 @@ async function processChat({ user, message, history = [], session = null }) {
     const rwClassification = classifyReadWrite(message);
     const forceLegacyRead = shouldUseLegacyReadPath(semanticAnalysis, message);
     summary.rwGate = rwClassification;
+    summary.forceLegacyRead = forceLegacyRead;
 
     if (rwClassification === 'READ' && !forceLegacyRead) {
       summary.readPipeline = true;
@@ -305,6 +331,7 @@ async function processChat({ user, message, history = [], session = null }) {
     if (rwClassification === 'READ' && forceLegacyRead) {
       summary.readPipeline = false;
       summary.legacyPathUsed = true;
+      console.log('[AI] Forcing legacy read path for overdue/installment-style query:', message);
     }
 
     // ── Legacy pipeline (WRITE ops or SQL pipeline fallback) ─────────────

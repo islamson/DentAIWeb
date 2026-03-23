@@ -54,6 +54,133 @@ function summarizeMemory(memory = null) {
   };
 }
 
+function inferOverdueInstallmentMetricFromText(text, previousContext = null) {
+  const q = String(text || '').toLocaleLowerCase('tr-TR');
+
+  const overdueLike =
+    /gecikmiş|gecikmis|vadesi geçmiş|vadesi gecmis|overdue/.test(q);
+
+  const installmentLike =
+    /taksit|taksiti|taksitin|taksitli|taksitlerin|odeme|ödeme|odemesi|ödemesi/.test(q);
+
+  const patientLike =
+    /hasta|hastasi|hastası|hastalar|hastalari|hastaları|hastalarin|hastaların|hastalarinin|hastalarının/.test(q);
+
+  const doctorLike =
+    /\bdr\b|dr\.|doktor|hekim/.test(q);
+
+  const ratioLike =
+    /oran|orani|oranı|yuzde|yüzde|payi|payı/.test(q);
+
+  const listLike =
+    /liste|listeler|goster|göster|kimler|hangileri/.test(q);
+
+  const countLike =
+    /kac|kaç|sayi|sayı|adet|var mi|var mı/.test(q);
+
+  const amountLike =
+    /tutar|toplam|ne kadar|miktar|borc|borç|alacak/.test(q);
+
+  if (!(overdueLike && installmentLike)) {
+    if (
+      previousContext &&
+      /kastediyorum|demek istiyorum|onu soruyorum|bundan bahsediyorum|ondan bahsediyorum|onu kastediyorum|sayisini kastediyorum|sayısını kastediyorum|tutarini kastediyorum|tutarını kastediyorum|oranini kastediyorum|oranını kastediyorum/.test(q)
+    ) {
+      const prevMetric = previousContext.lastMetric || null;
+      const overdueMetrics = new Set([
+        'overdue_installment_amount',
+        'overdue_installment_count',
+        'overdue_installment_patient_count',
+        'overdue_installment_patient_list',
+        'overdue_installment_ratio',
+        'doctor_overdue_installment_ratio',
+      ]);
+      if (overdueMetrics.has(prevMetric)) {
+        if (ratioLike) return 'overdue_installment_ratio';
+        if (listLike) return 'overdue_installment_patient_list';
+        if (amountLike) return 'overdue_installment_amount';
+        if (countLike) {
+          if (patientLike) return 'overdue_installment_patient_count';
+          return 'overdue_installment_count';
+        }
+        return prevMetric;
+      }
+    }
+
+    return null;
+  }
+
+  if (doctorLike && ratioLike) return 'doctor_overdue_installment_ratio';
+  if (ratioLike) return 'overdue_installment_ratio';
+  if (listLike) return 'overdue_installment_patient_list';
+  if (amountLike) return 'overdue_installment_amount';
+  if (countLike) {
+    if (patientLike) return 'overdue_installment_patient_count';
+    return 'overdue_installment_count';
+  }
+
+  if (patientLike) return 'overdue_installment_patient_count';
+  return 'overdue_installment_count';
+}
+
+function inferShapeFromMetric(metric) {
+  if (!metric) return null;
+
+  if (
+    [
+      'overdue_installment_amount',
+      'revenue_amount',
+      'collection_amount',
+      'pending_collection_amount',
+      'outstanding_balance_amount',
+      'overdue_receivables_amount',
+    ].includes(metric)
+  ) {
+    return 'amount';
+  }
+
+  if (
+    [
+      'overdue_installment_count',
+      'overdue_installment_patient_count',
+      'patient_count',
+      'appointment_count',
+      'payment_count',
+      'invoice_count',
+    ].includes(metric)
+  ) {
+    return 'count';
+  }
+
+  if (
+    [
+      'overdue_installment_patient_list',
+      'overdue_patient_list',
+      'debtor_patient_list',
+      'appointment_list',
+      'schedule_list',
+    ].includes(metric)
+  ) {
+    return 'list';
+  }
+
+  if (
+    [
+      'overdue_installment_ratio',
+      'doctor_overdue_installment_ratio',
+      'overdue_ratio',
+      'collection_rate',
+      'payment_invoice_ratio',
+      'no_show_rate',
+      'cancellation_rate',
+    ].includes(metric)
+  ) {
+    return 'ratio';
+  }
+
+  return null;
+}
+
 function buildSystemPrompt() {
   const today = new Date().toISOString().slice(0, 10);
   const intentLines = Object.entries(INTENT_HELP)
@@ -240,13 +367,75 @@ async function buildQueryPlan(message, opts = {}) {
     throw parseErr;
   }
 
+  function sanitizeRawPlannerOutput(rawPlan, text, previousContext = null) {
+    const next = { ...(rawPlan || {}) };
+
+    const inferredMetric = inferOverdueInstallmentMetricFromText(text, previousContext);
+
+    if (inferredMetric) {
+      next.metric = inferredMetric;
+      next.intent = INTENTS.finance_summary;
+
+      const inferredShape = inferShapeFromMetric(inferredMetric);
+      if (inferredShape) {
+        next.outputShape = inferredShape;
+      }
+    }
+
+    // LLM yanlış alias üretirse burada düzelt
+    if (next.metric === 'overdue_installment_patient_ratio') {
+      const q = String(text || '').toLocaleLowerCase('tr-TR');
+      if (/\bdr\b|dr\.|doktor|hekim/.test(q)) {
+        next.metric = METRICS.doctor_overdue_installment_ratio;
+        next.intent = INTENTS.finance_summary;
+        next.outputShape = OUTPUT_SHAPES.ratio;
+      } else {
+        next.metric = METRICS.overdue_installment_ratio;
+        next.intent = INTENTS.finance_summary;
+        next.outputShape = OUTPUT_SHAPES.ratio;
+      }
+    }
+
+    return next;
+  }
+
+  const sanitizedRawPlan = sanitizeRawPlannerOutput(
+    rawPlan,
+    trimmed,
+    memorySummary || null
+  );
+
   let plan;
   try {
-    plan = normalizePlannerOutput(rawPlan);
+    plan = normalizePlannerOutput(sanitizedRawPlan);
   } catch (err) {
     const parseErr = new Error(`Planner output failed validation: ${err.message}`);
     parseErr.code = 'AI_PLANNER_INVALID_OUTPUT';
     throw parseErr;
+  }
+
+  const protectedOverdueMetrics = new Set([
+    METRICS.overdue_installment_amount,
+    METRICS.overdue_installment_count,
+    METRICS.overdue_installment_patient_count,
+    METRICS.overdue_installment_patient_list,
+    METRICS.overdue_installment_ratio,
+    METRICS.doctor_overdue_installment_ratio,
+  ]);
+
+  const overdueMetricOverride = inferOverdueInstallmentMetricFromText(
+    trimmed,
+    memorySummary || null
+  );
+
+  if (overdueMetricOverride && protectedOverdueMetrics.has(overdueMetricOverride)) {
+    plan.metric = overdueMetricOverride;
+    plan.intent = INTENTS.finance_summary;
+
+    const inferredShape = inferShapeFromMetric(overdueMetricOverride);
+    if (inferredShape) {
+      plan.outputShape = inferredShape;
+    }
   }
 
   return {

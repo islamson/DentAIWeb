@@ -24,6 +24,166 @@ function formatCurrency(amount) {
   }).format(amount / 100);
 }
 
+function normalizeDoctorName(name) {
+  if (!name) return null;
+  return String(name)
+    .replace(/^dr\.?\s*/i, '')
+    .trim();
+}
+
+function isInstallmentOverdue(installment, now = new Date()) {
+  if (!installment) return false;
+  const dueDate = installment.dueDate ? new Date(installment.dueDate) : null;
+  if (!dueDate || Number.isNaN(dueDate.getTime())) return false;
+
+  const status = String(installment.status || '').toUpperCase();
+  return dueDate < now && !['PAID', 'CANCELLED'].includes(status);
+}
+
+function getPatientFullName(patient) {
+  if (!patient) return 'Bilinmeyen Hasta';
+  return [patient.firstName, patient.lastName].filter(Boolean).join(' ').trim() || 'Bilinmeyen Hasta';
+}
+
+function computeOverdueInstallmentSnapshot(paymentPlans = [], options = {}) {
+  const now = options.now ? new Date(options.now) : new Date();
+  const doctorId = options.doctorId || null;
+
+  const rows = [];
+  let overdueInstallmentCount = 0;
+  let overdueInstallmentAmount = 0;
+  const overduePatientIds = new Set();
+  const populationPatientIds = new Set();
+
+  for (const plan of paymentPlans) {
+    const patient = plan.patient || null;
+    const patientId = plan.patientId || patient?.id || null;
+    if (!patientId) continue;
+
+    if (doctorId) {
+      const matchedDoctor = (plan.patient?.appointments || []).some(
+        (appt) => appt?.doctorUserId === doctorId
+      );
+      if (!matchedDoctor) continue;
+    }
+
+    populationPatientIds.add(patientId);
+
+    const installments = Array.isArray(plan.installments) ? plan.installments : [];
+    const overdueInstallments = installments.filter((inst) => isInstallmentOverdue(inst, now));
+
+    if (overdueInstallments.length > 0) {
+      overduePatientIds.add(patientId);
+    }
+
+    const overdueAmountForPatient = overdueInstallments.reduce(
+      (sum, inst) => sum + Number(inst.amount || 0),
+      0
+    );
+
+    overdueInstallmentCount += overdueInstallments.length;
+    overdueInstallmentAmount += overdueAmountForPatient;
+
+    rows.push({
+      patientId,
+      patientName: getPatientFullName(patient),
+      overdueInstallmentCount: overdueInstallments.length,
+      overdueInstallmentAmount: overdueAmountForPatient,
+      overdueInstallments: overdueInstallments.map((inst) => ({
+        id: inst.id,
+        amount: Number(inst.amount || 0),
+        dueDate: inst.dueDate,
+        status: inst.status,
+      })),
+    });
+  }
+
+  rows.sort((a, b) => {
+    if (b.overdueInstallmentAmount !== a.overdueInstallmentAmount) {
+      return b.overdueInstallmentAmount - a.overdueInstallmentAmount;
+    }
+    return b.overdueInstallmentCount - a.overdueInstallmentCount;
+  });
+
+  return {
+    rows,
+    overdueInstallmentCount,
+    overdueInstallmentAmount,
+    overduePatientCount: overduePatientIds.size,
+    totalPatientCount: populationPatientIds.size,
+    overduePatientIds,
+    populationPatientIds,
+  };
+}
+
+async function fetchPaymentPlansForOverdueAnalysis(filter = {}) {
+  const { prisma } = require('../prisma');
+
+  const organizationId = filter.organizationId;
+  const branchId = filter.branchId || null;
+  const doctorId = filter.doctorId || null;
+
+  if (!organizationId) {
+    return { error: 'organizationId gerekli.' };
+  }
+
+  const plans = await prisma.paymentPlan.findMany({
+    where: {
+      organizationId,
+      ...(branchId
+        ? {
+            patient: {
+              branchId,
+            },
+          }
+        : {}),
+    },
+    include: {
+      patient: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          branchId: true,
+          appointments: doctorId
+            ? {
+                where: {
+                  doctorUserId: doctorId,
+                },
+                select: {
+                  id: true,
+                  doctorUserId: true,
+                  startAt: true,
+                },
+              }
+            : {
+                select: {
+                  id: true,
+                  doctorUserId: true,
+                  startAt: true,
+                },
+              },
+        },
+      },
+      installments: {
+        select: {
+          id: true,
+          amount: true,
+          dueDate: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: {
+          dueDate: 'asc',
+        },
+      },
+    },
+  });
+
+  return { plans };
+}
+
 async function buildPatientBalanceContext(patientId, organizationId) {
   const patient = await prisma.patient.findFirst({
     where: { id: patientId, organizationId },
@@ -1953,6 +2113,120 @@ async function buildClinicNoShowCountContext(filter) {
   };
 }
 
+async function buildOverdueInstallmentPatientsContext(filter = {}) {
+  const fetched = await fetchPaymentPlansForOverdueAnalysis(filter);
+  if (fetched.error) return { error: fetched.error };
+
+  const snapshot = computeOverdueInstallmentSnapshot(fetched.plans, {
+    doctorId: filter.doctorId || null,
+  });
+
+  return {
+    type: 'overdue_installment_patient_list',
+    count: snapshot.overduePatientCount,
+    patients: snapshot.rows.filter((r) => r.overdueInstallmentCount > 0),
+    totalPatientsInPopulation: snapshot.totalPatientCount,
+    currency: 'TRY',
+    source: 'payment_plans_installments',
+  };
+}
+
+async function buildOverdueInstallmentCountContext(filter = {}) {
+  const fetched = await fetchPaymentPlansForOverdueAnalysis(filter);
+  if (fetched.error) return { error: fetched.error };
+
+  const snapshot = computeOverdueInstallmentSnapshot(fetched.plans, {
+    doctorId: filter.doctorId || null,
+  });
+
+  return {
+    type: 'overdue_installment_count',
+    count: snapshot.overdueInstallmentCount,
+    overduePatientCount: snapshot.overduePatientCount,
+    totalPatientsInPopulation: snapshot.totalPatientCount,
+    source: 'payment_plans_installments',
+  };
+}
+
+async function buildOverdueInstallmentAmountContext(filter = {}) {
+  const fetched = await fetchPaymentPlansForOverdueAnalysis(filter);
+  if (fetched.error) return { error: fetched.error };
+
+  const snapshot = computeOverdueInstallmentSnapshot(fetched.plans, {
+    doctorId: filter.doctorId || null,
+  });
+
+  return {
+    type: 'overdue_installment_amount',
+    overdueInstallmentAmount: snapshot.overdueInstallmentAmount,
+    overdueInstallmentCount: snapshot.overdueInstallmentCount,
+    overduePatientCount: snapshot.overduePatientCount,
+    currency: 'TRY',
+    source: 'payment_plans_installments',
+  };
+}
+
+async function buildOverdueInstallmentRatioContext(filter = {}) {
+  const fetched = await fetchPaymentPlansForOverdueAnalysis(filter);
+  if (fetched.error) return { error: fetched.error };
+
+  const snapshot = computeOverdueInstallmentSnapshot(fetched.plans, {
+    doctorId: filter.doctorId || null,
+  });
+
+  const ratio =
+    snapshot.totalPatientCount > 0
+      ? Math.round((snapshot.overduePatientCount / snapshot.totalPatientCount) * 10000) / 100
+      : 0;
+
+  return {
+    type: 'overdue_installment_ratio',
+    shape: 'ratio',
+    ratio,
+    percentage: ratio,
+    numerator: snapshot.overduePatientCount,
+    denominator: snapshot.totalPatientCount,
+    source: 'payment_plans_installments',
+    details: {
+      overduePatientCount: snapshot.overduePatientCount,
+      totalPatientsInPopulation: snapshot.totalPatientCount,
+      overdueInstallmentCount: snapshot.overdueInstallmentCount,
+      overdueInstallmentAmount: snapshot.overdueInstallmentAmount,
+    },
+  };
+}
+
+async function buildDoctorOverdueInstallmentRatioContext(filter = {}) {
+  const fetched = await fetchPaymentPlansForOverdueAnalysis(filter);
+  if (fetched.error) return { error: fetched.error };
+
+  const snapshot = computeOverdueInstallmentSnapshot(fetched.plans, {
+    doctorId: filter.doctorId || null,
+  });
+
+  const ratio =
+    snapshot.totalPatientCount > 0
+      ? Math.round((snapshot.overduePatientCount / snapshot.totalPatientCount) * 10000) / 100
+      : 0;
+
+  return {
+    type: 'doctor_overdue_installment_ratio',
+    shape: 'ratio',
+    doctorId: filter.doctorId || null,
+    ratio,
+    percentage: ratio,
+    numerator: snapshot.overduePatientCount,
+    denominator: snapshot.totalPatientCount,
+    source: 'payment_plans_installments',
+    details: {
+      overduePatientCount: snapshot.overduePatientCount,
+      totalPatientsInPopulation: snapshot.totalPatientCount,
+      overdueInstallmentCount: snapshot.overdueInstallmentCount,
+      overdueInstallmentAmount: snapshot.overdueInstallmentAmount,
+    },
+  };
+}
+
 module.exports = {
   buildPatientBalanceContext,
   buildPatientLastPaymentContext,
@@ -2009,4 +2283,9 @@ module.exports = {
   buildDebtorPatientListContext,
   buildClinicCancelledAppointmentCountContext,
   buildClinicNoShowCountContext,
+  buildOverdueInstallmentPatientsContext,
+  buildOverdueInstallmentCountContext,
+  buildOverdueInstallmentAmountContext,
+  buildOverdueInstallmentRatioContext,
+  buildDoctorOverdueInstallmentRatioContext,
 };

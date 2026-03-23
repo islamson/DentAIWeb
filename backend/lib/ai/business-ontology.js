@@ -126,15 +126,114 @@ const FINANCE_METRIC_GLOSSARY = [
     ],
   },
   {
+    id: 'overdue_installment_patient_list',
+    metric: METRICS.overdue_installment_patient_list,
+    intent: INTENTS.finance_summary,
+    patterns: [
+      /\bgecikmis taksiti olan hastalar\b/,
+      /\bgecikmiş taksiti olan hastalar\b/,
+      /\bvadesi gecmis taksiti olan hastalar\b/,
+      /\bvadesi geçmiş taksiti olan hastalar\b/,
+      /\btaksiti geciken hastalar\b/,
+      /\btaksiti gecikmis hastalar\b/,
+      /\btaksiti gecikmiş hastalar\b/,
+      /\bgecikmis taksitli hastalar\b/,
+      /\bgecikmiş taksitli hastalar\b/,
+      /\bvadesi gecmis taksitli hastalar\b/,
+      /\bvadesi geçmiş taksitli hastalar\b/,
+    ],
+  },
+  {
+    id: 'overdue_installment_patient_count',
+    metric: METRICS.overdue_installment_patient_count,
+    intent: INTENTS.finance_summary,
+    patterns: [
+      /\bgecikmis taksiti olan hasta\b/,
+      /\bgecikmiş taksiti olan hasta\b/,
+      /\bvadesi gecmis taksiti olan hasta\b/,
+      /\bvadesi geçmiş taksiti olan hasta\b/,
+      /\bkac hastanin gecikmis taksiti var\b/,
+      /\bkaç hastanın gecikmiş taksiti var\b/,
+      /\bgecikmis taksitli hasta sayisi\b/,
+      /\bgecikmiş taksitli hasta sayısı\b/,
+      /\bvadesi gecmis taksitli hasta sayisi\b/,
+      /\bvadesi geçmiş taksitli hasta sayısı\b/,
+    ],
+  },
+  {
+    id: 'overdue_installment_count',
+    metric: METRICS.overdue_installment_count,
+    intent: INTENTS.finance_summary,
+    patterns: [
+      /\bgecikmis taksit sayisi\b/,
+      /\bgecikmiş taksit sayısı\b/,
+      /\bvadesi gecmis taksit sayisi\b/,
+      /\bvadesi geçmiş taksit sayısı\b/,
+      /\bkac gecikmis taksit var\b/,
+      /\bkaç gecikmiş taksit var\b/,
+      /\bkac vadesi gecmis taksit var\b/,
+      /\bkaç vadesi geçmiş taksit var\b/,
+      /\bvadesi gecmis taksitlerin sayisi\b/,
+      /\bvadesi geçmiş taksitlerin sayısı\b/,
+    ],
+  },
+  {
+    id: 'overdue_installment_amount',
+    metric: METRICS.overdue_installment_amount,
+    intent: INTENTS.finance_summary,
+    patterns: [
+      /\bgecikmis taksitlerin toplam tutari\b/,
+      /\bgecikmiş taksitlerin toplam tutarı\b/,
+      /\bvadesi gecmis taksitlerin toplam tutari\b/,
+      /\bvadesi geçmiş taksitlerin toplam tutarı\b/,
+      /\bgecikmis taksit tutari\b/,
+      /\bgecikmiş taksit tutarı\b/,
+      /\bvadesi gecmis taksit tutari\b/,
+      /\bvadesi geçmiş taksit tutarı\b/,
+      /\bgecikmis taksitlerden ne kadar\b/,
+      /\bgecikmiş taksitlerden ne kadar\b/,
+    ],
+  },
+  {
+    id: 'overdue_installment_ratio',
+    metric: METRICS.overdue_installment_ratio,
+    intent: INTENTS.finance_summary,
+    patterns: [
+      /\bgecikmis taksitli hastalarin orani\b/,
+      /\bgecikmiş taksitli hastaların oranı\b/,
+      /\bvadesi gecmis taksitli hastalarin orani\b/,
+      /\bvadesi geçmiş taksitli hastaların oranı\b/,
+      /\bgecikmis taksiti olan hastalarin olmayana orani\b/,
+      /\bgecikmiş taksiti olan hastaların olmayana oranı\b/,
+      /\bgecikmis taksit odemesi olan hastalarin olmayana orani\b/,
+      /\bgecikmiş taksit ödemesi olan hastaların olmayana oranı\b/,
+      /\btum taksitli hastalara orani\b/,
+      /\btüm taksitli hastalara oranı\b/,
+    ],
+  },
+  {
+    id: 'doctor_overdue_installment_ratio',
+    metric: METRICS.doctor_overdue_installment_ratio,
+    intent: INTENTS.finance_summary,
+    patterns: [
+      /\bdr\.?.*hastalarinin.*gecikmis taksit.*oran\b/,
+      /\bdr\.?.*hastalarının.*gecikmiş taksit.*oran\b/,
+      /\bdoktor.*hastalarinin.*gecikmis taksit.*oran\b/,
+      /\bdoktor.*hastalarının.*gecikmiş taksit.*oran\b/,
+      /\bdr\.?.*hastalarinin.*vadesi gecmis taksit.*oran\b/,
+      /\bdr\.?.*hastalarının.*vadesi geçmiş taksit.*oran\b/,
+    ],
+  },
+  {
     id: 'overdue_patient_list',
     metric: METRICS.overdue_patient_list,
     intent: INTENTS.finance_summary,
     patterns: [
-      /\bgecikmis taksit odemesi bulunan hasta\b/,
-      /\bgecikmiş taksit ödemesi bulunan hasta\b/,
-      /\bvadesi gecmis odemesi olan hastalar\b/,
-      /\bvadesi geçmiş ödemesi olan hastalar\b/,
-      /\boverdue installment patients\b/,
+      /\bvadesi gecmis borclu hastalar\b/,
+      /\bvadesi geçmiş borçlu hastalar\b/,
+      /\bgenel gecikmis borclu hasta listesi\b/,
+      /\bgenel gecikmiş borçlu hasta listesi\b/,
+      /\boverdue patients\b/,
     ],
   },
   {
@@ -144,13 +243,12 @@ const FINANCE_METRIC_GLOSSARY = [
     patterns: [
       /\bvadesi gecmis alacak\b/,
       /\bvadesi geçmiş alacak\b/,
-      /\bgecikmis taksit\b/,
-      /\bgecikmiş taksit\b/,
-      /\bvadesi gecmis odeme\b/,
-      /\bvadesi geçmiş ödeme\b/,
+      /\bvadesi gecmis toplam alacak\b/,
+      /\bvadesi geçmiş toplam alacak\b/,
       /\bgecikmis alacak\b/,
       /\bgecikmiş alacak\b/,
       /\boverdue receivable\b/,
+      /\boverdue balance\b/,
     ],
   },
   {
@@ -270,6 +368,39 @@ const LIST_HINT_PATTERNS = [
   /\bhangi randevular\b/,
   /\bhasta var mi\b/,
   /\bhasta var mı\b/,
+];
+
+const COUNT_HINT_PATTERNS = [
+  /\bkac\b/,
+  /\bkaç\b/,
+  /\bsayi\b/,
+  /\bsayı\b/,
+  /\badet\b/,
+  /\bvar mi\b/,
+  /\bvar mı\b/,
+  /\btoplam kac\b/,
+  /\btoplam kaç\b/,
+];
+
+const RATIO_HINT_PATTERNS = [
+  /\boran\b/,
+  /\borani\b/,
+  /\boranı\b/,
+  /\byuzde\b/,
+  /\byüzde\b/,
+  /\bpayi\b/,
+  /\bpayı\b/,
+  /\bpay\b/,
+];
+
+const DOCTOR_HINT_PATTERNS = [
+  /\bdr\b/,
+  /\bdoktor\b/,
+  /\bhekim\b/,
+  /\bhastalarinin\b/,
+  /\bhastalarının\b/,
+  /\bhastalari\b/,
+  /\bhastaları\b/,
 ];
 
 const AMOUNT_HINT_PATTERNS = [
@@ -449,7 +580,58 @@ function choosePrimaryFinanceMetric(foldedQuery, glossaryMatches) {
 
   const hasListHint = LIST_HINT_PATTERNS.some((pattern) => pattern.test(foldedQuery));
   const hasAmountHint = AMOUNT_HINT_PATTERNS.some((pattern) => pattern.test(foldedQuery));
+  const hasCountHint = COUNT_HINT_PATTERNS.some((pattern) => pattern.test(foldedQuery));
+  const hasRatioHint = RATIO_HINT_PATTERNS.some((pattern) => pattern.test(foldedQuery));
+  const hasDoctorHint = DOCTOR_HINT_PATTERNS.some((pattern) => pattern.test(foldedQuery));
 
+  const metricsInMatches = new Set(glossaryMatches.map((m) => m.metric));
+
+  // Doktor + overdue installment + oran
+  if (
+    hasDoctorHint &&
+    hasRatioHint &&
+    (
+      metricsInMatches.has(METRICS.doctor_overdue_installment_ratio) ||
+      metricsInMatches.has(METRICS.overdue_installment_ratio) ||
+      foldedQuery.includes('gecikmis taksit') ||
+      foldedQuery.includes('gecikmiş taksit') ||
+      foldedQuery.includes('vadesi gecmis taksit') ||
+      foldedQuery.includes('vadesi geçmiş taksit')
+    )
+  ) {
+    return METRICS.doctor_overdue_installment_ratio;
+  }
+
+  // Overdue installment domain
+  if (
+    metricsInMatches.has(METRICS.overdue_installment_amount) ||
+    metricsInMatches.has(METRICS.overdue_installment_count) ||
+    metricsInMatches.has(METRICS.overdue_installment_patient_count) ||
+    metricsInMatches.has(METRICS.overdue_installment_patient_list) ||
+    metricsInMatches.has(METRICS.overdue_installment_ratio)
+  ) {
+    if (hasRatioHint) return METRICS.overdue_installment_ratio;
+    if (hasListHint) return METRICS.overdue_installment_patient_list;
+    if (hasAmountHint) return METRICS.overdue_installment_amount;
+    if (hasCountHint) {
+      if (foldedQuery.includes('hasta')) return METRICS.overdue_installment_patient_count;
+      return METRICS.overdue_installment_count;
+    }
+
+    const explicitPriority = [
+      METRICS.doctor_overdue_installment_ratio,
+      METRICS.overdue_installment_ratio,
+      METRICS.overdue_installment_patient_list,
+      METRICS.overdue_installment_patient_count,
+      METRICS.overdue_installment_count,
+      METRICS.overdue_installment_amount,
+    ];
+
+    const explicitMatch = explicitPriority.find((metric) => metricsInMatches.has(metric));
+    if (explicitMatch) return explicitMatch;
+  }
+
+  // Generic overdue receivables
   const overdueMatch = glossaryMatches.find((match) =>
     [METRICS.overdue_receivables_amount, METRICS.overdue_patient_list].includes(match.metric)
   );
