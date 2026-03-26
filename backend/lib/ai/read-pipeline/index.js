@@ -125,7 +125,7 @@ async function executeReadPipeline({ ctx, message, memory, history, semanticCont
       console.warn('[ReadPipeline] SQL validation failed:', validation.reason);
       debug.stages.push({ stage: 'failed', reason: `SQL validation: ${validation.reason}` });
 
-      // 1. Try repair first (e.g. add LIMIT) — preserves valid structure
+      // Try repair (e.g. add LIMIT) — preserves valid structure
       const repairedSql = repairSql(rawSql, validation);
       if (repairedSql !== rawSql) {
         debug.repairedSql = repairedSql;
@@ -137,36 +137,15 @@ async function executeReadPipeline({ ctx, message, memory, history, semanticCont
         }
       }
 
-      // 2. If repair didn't fix it, retry SQL generation once
       if (finalRawSql === rawSql) {
-        debug.stages.push({ stage: 'sql_generator_retry', status: 'started' });
-        const { sql: retrySql } = await generateSql(readPlan, schemaSlice);
-        debug.stages[debug.stages.length - 1].status = 'completed';
-        debug.retrySql = retrySql;
-
-        logStage('RETRY_SQL', { sql: retrySql });
-
-        const retryValidation = validateSql(retrySql, { schemaAware: true });
-        debug.retryValidation = retryValidation;
-
-        logStage('RETRY_VALIDATION', {
-          valid: retryValidation.valid,
-          reason: retryValidation.reason || null,
-          code: retryValidation.code || null,
-        });
-
-        if (retryValidation.valid) {
-          finalRawSql = retrySql;
-        } else {
-          return {
-            answer: 'Bu soruyu güvenli bir şekilde cevaplayamıyorum. Lütfen sorunuzu farklı ifade edin.',
-            readPlan,
-            sqlUsed: null,
-            error: `SQL validation failed: ${retryValidation.reason}`,
-            errorCode: retryValidation.code || 'AI_SQL_VALIDATION_FAILED',
-            debug,
-          };
-        }
+        return {
+          answer: 'Bu soruyu güvenli bir şekilde cevaplayamıyorum. Lütfen sorunuzu farklı ifade edin.',
+          readPlan,
+          sqlUsed: null,
+          error: `SQL validation failed: ${validation.reason}`,
+          errorCode: validation.code || 'AI_SQL_VALIDATION_FAILED',
+          debug,
+        };
       }
     }
 

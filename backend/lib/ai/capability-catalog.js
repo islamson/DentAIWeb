@@ -9,7 +9,7 @@
  *  - requiredEntities
  *  - requiredFilters
  *  - retrievalName
- *  - layer: 'atomic' (all entries here are atomic; composite capabilities live in composite-catalog.js)
+ *  - layer: 'atomic' (all entries here are atomic; composite capabilities were deprecated)
  *
  * The grounding guard, semantic validator, and pipeline all reference this catalog
  * to determine whether retrieved data matches the expected output shape.

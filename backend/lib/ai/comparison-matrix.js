@@ -105,17 +105,7 @@ function canCompare(metric, comparisonPeriod = 'previous_month', entityType = 'n
   return true;
 }
 
-/**
- * Get the comparison executor retrieval name for a metric.
- */
-function getComparisonRetrievalName(metric) {
-  const entry = COMPARISON_MATRIX[metric];
-  if (!entry?.supportsComparison) return null;
-  return entry.retrievalName || null;
-}
-
 module.exports = {
   COMPARISON_MATRIX,
   canCompare,
-  getComparisonRetrievalName,
 };
